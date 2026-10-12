@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b0716">
+  <meta name="color-scheme" content="dark">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Arcania">
+  <meta name="format-detection" content="telephone=no">
+  <title>Arcania Academy</title>
+  <!-- Empty data-URI favicon: avoids a 404 console error. -->
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <canvas id="game" tabindex="0" aria-label="Arcania Academy"></canvas>
+  <!-- Measures env(safe-area-inset-*) so the engine can expose safe insets to the UI. -->
+  <div id="safe-probe" aria-hidden="true"></div>
+  <div id="boot-error" hidden></div>
+  <noscript><p class="noscript">Arcania Academy needs JavaScript enabled.</p></noscript>
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "arcania-academy",
+  "version": "0.1.0",
+  "description": "Arcania Academy - 2D top-down pixel-art spell-crafting RPG for the browser (vanilla JS, Canvas 2D, zero runtime deps).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node scripts/check.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
+}
