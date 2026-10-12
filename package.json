@@ -7,7 +7,16 @@
   "scripts": {
     "start": "node server.js",
     "check": "node scripts/check.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "test:combat": "node scripts/combat-test.mjs",
+    "test:dungeon": "node scripts/dungeon-test.mjs",
+    "test:flow": "node scripts/world-flow.mjs",
+    "test:world": "node scripts/dungeon-test.mjs && node scripts/world-flow.mjs",
+    "playthrough": "node scripts/playthrough.mjs",
+    "perf": "node scripts/perf.mjs",
+    "test": "npm run check && npm run test:combat && npm run test:dungeon && npm run test:flow && npm run smoke && npm run playthrough",
+    "shots:world": "node scripts/world-shots.mjs",
+    "shots:combat": "node scripts/combat-shots.mjs"
   },
   "engines": {
     "node": ">=18"

@@ -4,7 +4,7 @@
 // 'inc:<key>' 'slider:<key>' 'opt:<key>:<i>' 'settings-back' | pause 'resume' 'inventory' 'settings'
 // 'quit' | gameover 'respawn' | victory 'title' | prompts 'confirm-yes' 'confirm-no'.
 import { EV } from '../../core/events.js';
-import { drawText, measureText } from '../font.js';
+import { drawText, measureText, wrapText } from '../font.js';
 import { createHits, promptDevice } from '../widgets.js';
 import {
   COL, panel, inset, ribbon, keycap, mouseGlyph, bar, dim, rrect, sparkle, mix, clamp,
@@ -364,12 +364,12 @@ function smallButton(ctx, x, y, w, h, label, pressed, t) {
 // ===================================================================== PAUSE
 
 const PC_CONTROLS = [
-  ['WASD', 'Move'], ['@mouse', 'Aim'], ['1-4', 'Cast spells'], ['E', 'Interact'],
-  ['I', 'Bag'], ['C', 'Craft (hub)'], ['ESC', 'Pause'],
+  ['WASD', 'Move'], ['@mouse', 'Aim'], ['1-4', 'Cast spells'], ['SHIFT', 'Dash (or R-click)'],
+  ['Q', 'Health potion'], ['E', 'Interact'], ['I', 'Bag'], ['C', 'Craft (hub)'], ['ESC', 'Pause'],
 ];
 const TOUCH_CONTROLS = [
-  ['STICK', 'Left thumb: move'], ['1-4', 'Spell buttons'], ['E', 'Interact'],
-  ['INV', 'Bag'], ['II', 'Pause'],
+  ['STICK', 'Left thumb: move'], ['1-4', 'Spell buttons'], ['>>', 'Dash'], ['+', 'Potion'],
+  ['E', 'Interact'], ['INV', 'Bag'], ['II', 'Pause'],
 ];
 
 export function pausePanel(game, ui) {
@@ -430,6 +430,11 @@ export function pausePanel(game, ui) {
       let pw, ph;
       if (wide) { pw = 14 + bw + 18 + cardW + 14; ph = 18 + Math.max(infoH + btnH, cardH) + 14; }
       else { pw = Math.min(Rr - L - 16, Math.max(bw, cardW) + 40); ph = 18 + infoH + btnH + 12 + cardH + 14; }
+      // current objective (world.getObjective) along the bottom of the panel
+      const objText = g.isGameplay() ? g.guard('world.getObjective', () => g.world.getObjective?.(g)) || '' : '';
+      const objLines = objText ? wrapText(objText, pw - 40).slice(0, 3) : [];
+      const objH = objLines.length ? objLines.length * 8 + 10 : 0;
+      ph += objH;
       const px = R((L + Rr - pw) / 2);
       const py = R(T + (B - T - ph) / 2 + (1 - k) * -10);
       ctx.save();
@@ -469,6 +474,11 @@ export function pausePanel(game, ui) {
         else kw = keycap(ctx, key, cxx + 8, ry - 1, touch ? { face: '#2a4a3a' } : {});
         void kw;
         drawText(ctx, label, cxx + 8 + colW + 6, ry + 1, { color: COL.text });
+      }
+      if (objH) {
+        const oy = py + ph - objH - 8;
+        divider(ctx, px + pw / 2, oy, pw - 28, COL.edgeLo, COL.edge);
+        objLines.forEach((l, i) => drawText(ctx, l, px + pw / 2, oy + 6 + i * 8, { align: 'center', color: COL.goldHi }));
       }
       ctx.restore();
       if (confirm.active) confirm.render(ctx, g, hits);

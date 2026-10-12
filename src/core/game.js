@@ -12,7 +12,7 @@ import { RNG } from './rng.js';
 import { TileMapRenderer } from './tilemap-renderer.js';
 import { SCENES } from './config.js';
 import { createNewState, setFlag, clampVitals } from './state.js';
-import { saveGame, loadGame, loadSettings, saveSettings } from './save.js';
+import { saveGame, loadGame, loadSettings, saveSettings, PARTICLE_QUALITY } from './save.js';
 
 export const VERSION = '0.1.0';
 export const GAMEPLAY_SCENES = Object.freeze([SCENES.HUB, SCENES.DUNGEON, SCENES.TOWER, SCENES.BOSS]);
@@ -81,6 +81,8 @@ export async function createGame(canvas, modules) {
     /** Seconds since boot (always advances; use for UI/title animation). */
     realTime: 0,
     hitStopTimer: 0,
+    /** Seconds until a pending autosave (0 = clean). */
+    saveDirty: 0,
     // Team modules (filled below).
     art: modules.art,
     combat: modules.combat,
@@ -113,15 +115,22 @@ export async function createGame(canvas, modules) {
     isGameplay() {
       return GAMEPLAY_SCENES.includes(game.scenes?.currentName);
     },
-    save() {
+    /** Persist the state. opts.auto = background autosave (UI may skip the "saved" indicator). */
+    save(opts = {}) {
       if (!game.inSession) return false;
       clampVitals(game.state);
       const ok = saveGame(game.state);
-      bus.emit(EV.GAME_SAVED, { ok });
+      bus.emit(EV.GAME_SAVED, { ok, auto: !!opts.auto });
       return ok;
     },
     saveSettings() {
+      game.applySettings();
       return saveSettings(game.settings);
+    },
+    /** Push settings that core owns the wiring for into the team modules. */
+    applySettings() {
+      const q = PARTICLE_QUALITY[game.settings.particleQuality] ?? 1;
+      guard('fx.setQualityCap', () => game.fx?.setQualityCap?.(q));
     },
   };
 
@@ -135,6 +144,7 @@ export async function createGame(canvas, modules) {
   game.fx = modules.createFx(game);
   game.audio = modules.createAudio(game);
   game.ui = modules.createUI(game);
+  game.applySettings();
   modules.combat.initCombat(game);
   modules.world.initWorld(game);
 
@@ -147,6 +157,11 @@ export async function createGame(canvas, modules) {
   // ---- loop ------------------------------------------------------------------------
   const tick = (dt) => {
     game.realTime += dt;
+    // debounced autosave after progress events (crafts, flags, gear...), so closing the tab never loses them
+    if (game.saveDirty > 0 && (game.saveDirty -= dt) <= 0 && game.isGameplay() && !game.scenes.transitioning && game.state.player.hp > 0) {
+      game.saveDirty = 0;
+      game.save({ auto: true });
+    }
     input.update(dt);
     guard('ui.update', () => game.ui.update(dt));
     guard('scenes.update', () => game.scenes.update(dt));
@@ -250,6 +265,12 @@ function installFlow(game) {
   });
 
   bus.on(EV.SAVE_REQUEST, () => game.save());
+  // Autosave: progress events mark the save dirty; core saves ~1.5 s later (see tick()).
+  const markDirty = () => { if (game.inSession && !(game.saveDirty > 0)) game.saveDirty = 1.5; };
+  for (const t of [EV.FLAG_CHANGED, EV.SPELL_LEARNED, EV.SPELL_CRAFTED, EV.LOADOUT_CHANGED, EV.EQUIPMENT_CHANGED,
+    EV.INVENTORY_CHANGED, EV.FRAGMENTS_CHANGED, EV.DUNGEON_CLEARED, EV.TOWER_FLOOR_CLEARED]) bus.on(t, markDirty);
+  bus.on(EV.GAME_SAVED, () => { game.saveDirty = 0; });
+  window.addEventListener('pagehide', () => { if (game.isGameplay() && game.state.player.hp > 0) game.save(); });
   bus.on(EV.CAMERA_SHAKE, ({ intensity = 3, duration = 0.25 } = {}) => {
     if (game.settings.screenShake) game.camera.shake(intensity, duration);
   });
@@ -260,6 +281,7 @@ function installFlow(game) {
     if (document.hidden && game.isGameplay() && !game.ui.blocksWorld()) {
       game.guard('ui.open(pause)', () => game.ui.open('pause'));
     }
+    if (document.hidden && game.isGameplay() && game.state.player.hp > 0) game.save();
     if (document.hidden) game.guard('audio.suspend', () => game.audio.suspend?.());
     else game.guard('audio.resume', () => game.audio.resume?.());
   });

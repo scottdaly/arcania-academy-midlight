@@ -174,6 +174,8 @@ export class Projectile extends Entity {
     this.hitIds = new Set();
     this.layer = 2;
     this.trail = [];
+    /** Visual height above the ground (px); fx offsets the auto halo/trail by this. */
+    this.drawHeight = 6;
     this.seekTarget = null;
     this.seekT = 0;
     this.auraT = 0.2;
@@ -225,7 +227,7 @@ export class Projectile extends Entity {
     }
     const c = this.colors[0];
     fx(game, 'addLight', this.x, this.y - 6, this.isOrb ? 40 : 26, c, 0.9);
-    if (Math.random() < (this.isOrb ? 0.9 : 0.45)) fx(game, 'emit', 'trail', this.x, this.y - 6, { color: this.colors[0], color2: this.colors[1], count: 1 });
+    // (particle trail + halo are automatic in fx for 'projectile'-tagged entities)
   }
 
   aura(game, dt) {
@@ -302,16 +304,6 @@ export class Projectile extends Entity {
   renderGlow(ctx) {
     const [c1, c2] = this.colors;
     const x = Math.round(this.rx), y = Math.round(this.ry) - 6, r = this.radius;
-    // trail
-    const t = this.trail;
-    for (let i = 0; i < t.length; i += 2) {
-      const k = (i / 2 + 1) / (t.length / 2 + 1);
-      ctx.globalAlpha = 0.35 * k;
-      ctx.fillStyle = c1;
-      const rr = Math.max(1, Math.round(r * k * 0.8));
-      ctx.fillRect(Math.round(t[i]) - rr, Math.round(t[i + 1]) - 6 - rr, rr * 2, rr * 2);
-    }
-    ctx.globalAlpha = 1;
     if (this.hostile) {
       // enemy shots: diamond with a hot rim so they read as dangerous
       ctx.fillStyle = c1;
@@ -323,8 +315,9 @@ export class Projectile extends Entity {
       ctx.fillRect(x - 1, y - 1, 2, 2);
       return;
     }
+    // fx draws the per-element halo (drawSpellOrb-style) + trail automatically; we add the bright body
     ctx.fillStyle = c1;
-    fillDisc(ctx, x, y, r);
+    fillDisc(ctx, x, y, Math.max(1, r - 1));
     ctx.fillStyle = c2;
     fillDisc(ctx, x, y, Math.max(1, r - 2));
     if (this.isOrb) {

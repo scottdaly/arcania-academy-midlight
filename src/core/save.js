@@ -75,7 +75,12 @@ export const DEFAULT_SETTINGS = Object.freeze({
   touchControls: 'auto',
   screenShake: true,
   showFps: false,
+  /** 'low' | 'medium' | 'high' - caps fx particle density (fx.setQualityCap). */
+  particleQuality: 'high',
 });
+
+/** particleQuality setting -> fx quality ceiling. */
+export const PARTICLE_QUALITY = Object.freeze({ low: 0.35, medium: 0.65, high: 1 });
 
 export function loadSettings() {
   const out = { ...DEFAULT_SETTINGS };

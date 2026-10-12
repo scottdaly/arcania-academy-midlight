@@ -78,6 +78,7 @@ export function createFx(game) {
   let dmgVignette = 0;
   let lightCanvas = null, lightCtx = null;
   let quality = 1;
+  let qualityCap = 1; // user setting ceiling (settings.particleQuality); the adaptive loop stays below it
   let frameEma = 16.7, lastFrame = 0;
   let levelKind = null, levelTheme = 'academy';
   let ambientAcc = 0;
@@ -308,7 +309,10 @@ export function createFx(game) {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(X, Y, 1, 1);
     },
-    setQuality(q) { quality = Math.max(0.25, Math.min(1, q)); P.cap = Math.round(MAX_PARTICLES * quality); },
+    setQuality(q) { quality = Math.max(0.25, Math.min(qualityCap, q)); P.cap = Math.round(MAX_PARTICLES * quality); },
+    /** Upper bound for quality (0.25..1), from settings.particleQuality. */
+    setQualityCap(c) { qualityCap = Math.max(0.25, Math.min(1, c)); fx.setQuality(Math.min(quality, qualityCap)); },
+    get qualityCap() { return qualityCap; },
     get quality() { return quality; },
 
     update(dt) {
@@ -432,11 +436,11 @@ export function createFx(game) {
         const r = Math.round((e.radius || 3) * 2.4 + Math.sin(game.time * 25 + e.id) * 0.8);
         for (const el of list) {
           ctx.globalAlpha = 0.7 / Math.sqrt(list.length);
-          ctx.drawImage(glowSprite(SIGS[el].main, r), Math.round(e.rx) - r, Math.round(e.ry) - r);
+          ctx.drawImage(glowSprite(SIGS[el].main, r), Math.round(e.rx) - r, Math.round(e.ry - (e.drawHeight ?? 0)) - r);
         }
         ctx.globalAlpha = 0.9;
         ctx.fillStyle = SIGS[list[0]].core;
-        ctx.fillRect(Math.round(e.rx) - 1, Math.round(e.ry) - 1, 2, 2);
+        ctx.fillRect(Math.round(e.rx) - 1, Math.round(e.ry - (e.drawHeight ?? 0)) - 1, 2, 2);
       }
       // telegraph rims
       forEachTelegraph((x, y, r, prog, color, hi) => {
@@ -586,7 +590,7 @@ export function createFx(game) {
       const dt = Math.min(100, now - lastFrame);
       frameEma = frameEma * 0.95 + dt * 0.05;
       if (frameEma > 21) fx.setQuality(quality - 0.01);
-      else if (frameEma < 17.5 && quality < 1) fx.setQuality(quality + 0.002);
+      else if (frameEma < 17.5 && quality < qualityCap) fx.setQuality(quality + 0.002);
     }
     lastFrame = now;
   }
@@ -601,7 +605,7 @@ export function createFx(game) {
       if (tags.has('projectile')) {
         if (!cam.isVisible(e.x, e.y, 16)) continue;
         const els = e.spell?.elements?.length ? e.spell.elements : e.element;
-        spellTrail(els, 'projectile', e.x, e.y, { dirX: e.vx || e.dirX || 0, dirY: e.vy || e.dirY || 0, power: e.spell?.tier >= 2 ? 1.25 : 1 });
+        spellTrail(els, 'projectile', e.x, e.y - (e.drawHeight ?? 0), { dirX: e.vx || e.dirX || 0, dirY: e.vy || e.dirY || 0, power: e.spell?.tier >= 2 ? 1.25 : 1 });
         continue;
       }
       if (tags.has('enemy') && !tags.has('boss')) {

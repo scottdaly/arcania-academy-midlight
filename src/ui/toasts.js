@@ -51,10 +51,22 @@ export function createToasts(game, ui) {
     const W = game.display.width, s = game.display.safe;
     const hudY = game.isGameplay() && game.player ? ui.hud?.toastY : null;
     let y = hudY ?? s.top + (game.isGameplay() ? (W < 360 ? 44 : 30) : 8);
-    const maxTextW = Math.max(60, W - s.left - s.right - 34);
+    const cx = s.left + (W - s.left - s.right) / 2;
+    let maxTextW = Math.max(60, W - s.left - s.right - 34);
+    // keep clear of the HUD's top-left objective tracker and top-right minimap: wrap narrower, or drop below
+    const L = game.isGameplay() ? ui.hud?.layout : null;
+    const avoid = L ? [L.quest, L.minimap].filter((r) => r && r.w > 0) : [];
+    let half = Infinity, below = 0;
+    for (const r of avoid) {
+      half = Math.min(half, r.x > cx ? r.x - cx : cx - (r.x + r.w));
+      below = Math.max(below, r.y + r.h + 4);
+    }
+    half -= 4;
+    if (avoid.length && half * 2 < 150) { y = Math.max(y, below); half = Infinity; }
     for (const t of list) {
       const iconW = t.icon || t.emblem ? 11 : 0;
-      const lines = measureText(t.text) > maxTextW - iconW ? wrapText(t.text, maxTextW - iconW) : [t.text];
+      const lim = y < below && half < Infinity ? Math.min(maxTextW, half * 2 - 12) : maxTextW;
+      const lines = measureText(t.text) > lim - iconW ? wrapText(t.text, lim - iconW) : [t.text];
       let tw = 0;
       for (const l of lines) tw = Math.max(tw, measureText(l));
       const w = tw + 12 + iconW;

@@ -38,6 +38,8 @@ export class Archmage extends Enemy {
     this.maxHp = this.hp = def.hp;
     this.aggro = true;
     this.phase = 1;
+    /** Total phases (UI draws one pip per phase). */
+    this.phaseCount = 3;
     this.state = 'intro';
     this.stateT = 1.6;
     this.ward = null;

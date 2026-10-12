@@ -247,8 +247,9 @@ function wire(game, audio, warnOnce) {
     if ((sp?.tier ?? 0) >= 3 && !enemy) sfx('cast_swell', { ...pos, volume: 0.9 });
   });
 
-  on(EV.ENTITY_DAMAGED, ({ target, crit, x, y }) => {
+  on(EV.ENTITY_DAMAGED, ({ target, crit, x, y, dot }) => {
     if (isPlayer(game, target)) return;
+    if (dot) return; // burn/poison ticks: the status aura is feedback enough
     const mat = material(target);
     const name = { armor: 'hit_armor', stone: 'hit_stone', boss: 'hit_boss', flesh: 'hit_flesh' }[mat] || 'hit';
     sfx(name, { x: x ?? target?.x, y: y ?? target?.y, volume: crit ? 1.35 : 1, pitch: crit ? 1.15 : 1 });
@@ -263,7 +264,7 @@ function wire(game, audio, warnOnce) {
     sfx(name, { x: x ?? target.x, y: y ?? target.y });
   });
 
-  on(EV.PLAYER_DAMAGED, () => sfx('player_hurt'));
+  on(EV.PLAYER_DAMAGED, ({ dot } = {}) => sfx('player_hurt', dot ? { volume: 0.35, pitch: 1.2 } : undefined));
   on(EV.PLAYER_HEALED, ({ amount }) => {
     if (amount != null && amount <= 0) return;
     if (now() - lastPickupHeal < 0.15) return; // pickup/potion sound already covers it

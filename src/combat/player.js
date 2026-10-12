@@ -13,20 +13,6 @@ const DASH_SPEED = 255;
 const DASH_INVULN = 0.24;
 const DASH_COOLDOWN = 0.85;
 
-// ---- keyboard / mouse fallbacks until core adds 'dash' / 'potion' input actions -------------
-// (requests/combat.md). Latched so a tap between ticks is never lost.
-const latch = { dash: false, potion: false };
-let listening = false;
-function listen() {
-  if (listening || typeof window === 'undefined') return;
-  listening = true;
-  window.addEventListener('keydown', (e) => {
-    if (e.repeat) return;
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') latch.dash = true;
-    if (e.code === 'KeyQ') latch.potion = true;
-  });
-}
-
 export class Player extends Entity {
   constructor(game, x, y) {
     super(x, y);
@@ -60,8 +46,6 @@ export class Player extends Entity {
     this.cooldowns = new Map();
     this.statuses = [];
     this.runes = [];
-    listen();
-    latch.dash = latch.potion = false;
   }
 
   onAdd(game) {
@@ -118,9 +102,8 @@ export class Player extends Entity {
     this.animT += dt;
     for (let i = this.ghosts.length - 1; i >= 0; i--) if ((this.ghosts[i].t -= dt) <= 0) this.ghosts.splice(i, 1);
     if (this.dying || st.hp <= 0) {
-      this.anim = 'die';
+      if (this.anim !== 'die') { this.anim = 'die'; this.animT = 0; }
       if (!this.dying) this.die(game, null);
-      latch.dash = latch.potion = false;
       return;
     }
     const map = game.level?.map;
@@ -129,14 +112,11 @@ export class Player extends Entity {
     if (this.dying) return;
 
     // ---- dash
-    let wantDash = latch.dash || input.pressed?.('dash');
-    latch.dash = false;
-    for (const ev of input.pointerEvents || []) if (ev.type === 'down' && ev.button === 2 && ev.pointerType === 'mouse') wantDash = true;
-    if (wantDash && this.dashCd <= 0 && this.dashT <= 0) this.startDash(game);
+    // (core input: Shift / right mouse button / touch dash button)
+    if (input.pressed('dash') && this.dashCd <= 0 && this.dashT <= 0) this.startDash(game);
 
     // ---- potion hotkey
-    if (latch.potion || input.pressed?.('potion')) {
-      latch.potion = false;
+    if (input.pressed('potion')) {
       const id = st.hp < st.maxHp ? (game.state.inventory.find((s) => s.id === 'potion_health') ? 'potion_health' : 'elixir') : null;
       if (id && !useItem(game, id)) game.bus.emit(EV.TOAST, { text: 'No health potions', color: '#ff8a8a', duration: 0.8 });
     }
@@ -166,6 +146,12 @@ export class Player extends Entity {
       const n = normalize(mv.x, mv.y);
       this.facingX = n.x; this.facingY = n.y;
     }
+    // ---- footsteps (quiet; cadence follows speed)
+    const spd = Math.hypot(this.vx, this.vy);
+    if (this.dashT <= 0 && spd > 20) {
+      this.stepT = (this.stepT || 0) - dt * (spd / 80);
+      if (this.stepT <= 0) { this.stepT = 0.3; sfx(game, 'footstep', 0.35, 0.9 + Math.random() * 0.2); }
+    } else this.stepT = 0.08;
 
     // ---- hazards (lava, poison...)
     this.hazardT -= dt;
@@ -211,7 +197,8 @@ export class Player extends Entity {
       }
     }
 
-    this.anim = this.hurtT > 0 ? 'hurt' : this.castAnim > 0 ? 'cast' : (Math.abs(this.vx) + Math.abs(this.vy) > 8) ? 'walk' : 'idle';
+    const anim = this.hurtT > 0 ? 'hurt' : this.castAnim > 0 ? 'cast' : (Math.abs(this.vx) + Math.abs(this.vy) > 8) ? 'walk' : 'idle';
+    if (anim !== this.anim) { this.anim = anim; this.animT = 0; } // one-shot cast/hurt anims start at frame 0
   }
 
   startDash(game) {

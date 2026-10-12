@@ -2,7 +2,9 @@
 
 <!-- Append entries below (see README.md for the format). -->
 
-## Document the world story flags in ARCHITECTURE.md §7.6            (status: open)
+## Document the world story flags in ARCHITECTURE.md §7.6            (status: done)
+- Resolution: §7.6 rewritten from this list. The objective (`world.getObjective`) is now shown by the HUD tracker
+  and the pause menu; the hub no longer toasts it on entry (the tracker flashes instead).
 - What: doc update only (world owns these keys; no code change needed).
 - Why: other teams (UI quest log, combat recipe gates) may want to read them.
 - Proposed shape (all booleans, set through `setFlag`):
@@ -16,7 +18,9 @@
   and `state.dungeon.runs/deepest/lastSeed`.
 - Workaround in the meantime: none needed.
 
-## npm scripts for the world test tools                               (status: open)
+## npm scripts for the world test tools                               (status: done)
+- Resolution: `test:dungeon`, `test:flow`, `test:world`, `shots:world` (+ `test:combat`, `shots:combat`, `playthrough`, `perf`)
+  and `npm test` running check + combat + dungeon + flow + smoke + playthrough.
 - What: `package.json` scripts (core owns package.json, so world did not edit it).
 - Why: world added three dev scripts under `scripts/` (as requested by the lead):
   - `scripts/dungeon-test.mjs [seeds=300] [maxDepth=9]` - headless (plain Node): generates seeds x depths and
@@ -30,14 +34,17 @@
   `"shots:world": "node scripts/world-shots.mjs"`.
 - Workaround: run them with `node` directly.
 
-## New tile: MAGIC_BARRIER                                            (status: open, nice-to-have)
+## New tile: MAGIC_BARRIER                                            (status: declined)
+- Resolution: the FENCE + `Barrier` entity workaround looks and plays right (and spells passing the seal is a feature),
+  so no new core tile was added.
 - What: a deco tile `MAGIC_BARRIER` (solid, blocksShot, animated, light `{radius: 24, color: '#b05aff'}`).
 - Why: ambush rooms seal their doorways while the waves are alive.
 - Workaround in the meantime: world sets `TILE.FENCE` on the doorway tiles and draws a `Barrier` entity
   (sprite `prop_barrier`, which art already provides) over it. FENCE is not `blocksShot`, so spells pass through
   the seal - which is actually fine for gameplay.
 
-## New tiles: BED, BENCH, ANVIL                                       (status: open, nice-to-have)
+## New tiles: BED, BENCH, ANVIL                                       (status: declined)
+- Resolution: the CRATE+RUG / CHAIR / TABLE+CAULDRON substitutes read fine at this resolution; deferred.
 - What: deco tiles. BED (solid, not blocksShot), BENCH (non-solid), ANVIL (solid, not blocksShot).
 - Why: dormitory beds, courtyard benches and the forge anvil.
 - Workaround: dorm beds are CRATE + RUG pairs, benches are CHAIR, the forge uses TABLE/CAULDRON/BRAZIER.

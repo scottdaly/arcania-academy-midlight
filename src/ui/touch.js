@@ -22,6 +22,7 @@ const STICK_ZONE = 0.45;
 export function createTouchControls(game, ui) {
   const { input, display } = game;
   const hasDash = ACTIONS.includes('dash');
+  const hasPotion = ACTIONS.includes('potion');
   const stick = { id: null, ox: 0, oy: 0, x: 0, y: 0, mx: 0, my: 0, alpha: 0, homeX: 0, homeY: 0, lastX: 0, lastY: 0 };
   /** [{action, kind:'spell'|'interact'|'dash'|'small', slot?, icon?, x, y, r}] */
   const buttons = [];
@@ -68,8 +69,9 @@ export function createTouchControls(game, ui) {
     [180, 225, 270].forEach((a, i) => addButton(`spell${i + 2}`, 'spell', ax + Math.cos(a * deg) * D1, ay + Math.sin(a * deg) * D1, r, { slot: i + 1 }));
     const ri = Math.max(13, r - 2);
     const D2 = D1 + r + ri + 6;
-    addButton('interact', 'interact', ax + Math.cos(202.5 * deg) * D2, ay + Math.sin(202.5 * deg) * D2, ri);
-    if (hasDash) addButton('dash', 'dash', ax + Math.cos(247.5 * deg) * D2, ay + Math.sin(247.5 * deg) * D2, ri);
+    addButton('interact', 'interact', ax + Math.cos(186 * deg) * D2, ay + Math.sin(186 * deg) * D2, ri);
+    if (hasDash) addButton('dash', 'dash', ax + Math.cos(228 * deg) * D2, ay + Math.sin(228 * deg) * D2, ri);
+    if (hasPotion) addButton('potion', 'potion', ax + Math.cos(270 * deg) * D2, ay + Math.sin(270 * deg) * D2, ri);
 
     const rs = 11;
     const ty = s.top + m + rs;
@@ -388,6 +390,16 @@ export function createTouchControls(game, ui) {
     if (b.kind === 'dash') {
       const sz = maskSize('dash');
       drawMask(ctx, 'dash', x - Math.floor(sz.w / 2), y - Math.floor(sz.h / 2), '#a8e0ff', '#ffffff', '#4a8ac8');
+      const v = game.combat.getDashCooldown?.(game) || 0;
+      if (v > 0) drawSweep(ctx, x - r + 2, y - r + 2, 2 * r - 3, 2 * r - 3, v, 'rgba(8,4,16,0.6)', 'circle');
+    } else if (b.kind === 'potion') {
+      const inv = game.state.inventory;
+      const n = (inv.find((s) => s.id === 'potion_health')?.qty || 0) + (inv.find((s) => s.id === 'elixir')?.qty || 0);
+      game.art.drawIcon(ctx, 'item_potion_health', x - 8, y - 8, { alpha: n ? 1 : 0.4 });
+      const bx = Math.round(x + r * 0.72), by = Math.round(y + r * 0.72);
+      drawDisc(ctx, bx, by, 4, COL.ink);
+      drawDisc(ctx, bx, by, 3, '#2a1e44');
+      drawText(ctx, String(Math.min(9, n)), bx + 1, by - 2, { align: 'center', color: n ? COL.goldHi : COL.dimmer, shadow: null });
     } else {
       const sz = maskSize(b.icon);
       const col = b.icon === 'anvil' ? ['#ffb84a', '#fff2b0', '#b07a20'] : ['#e8e0ff', '#ffffff', '#8a80a8'];

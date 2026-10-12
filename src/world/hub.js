@@ -377,9 +377,8 @@ export function buildHub(game, spec) {
     onEnter(g) {
       if (from === 'respawn') {
         g.after(0.7, () => openDialogue(g, 'healer_respawn', 'healer'));
-      } else if (from === 'newGame' || from === 'continue' || from === 'debug' || from == null) {
-        g.after(1.2, () => g.bus.emit(EV.TOAST, { text: getObjective(g.state), color: '#ffd25a', duration: 4 }));
       }
+      // (the HUD's objective tracker shows getObjective() and flashes on arrival)
     },
   };
 }

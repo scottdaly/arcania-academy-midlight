@@ -270,8 +270,8 @@ export class Pickup extends Entity {
     else if (kind === 'item') {
       addItem(game, data.itemId, amount);
       const slot = game.combat?.getItem?.(data.itemId)?.slot;
-      const extra = slot === 'staff' || slot === 'robe' ? ' - equip it from your inventory (I)' : '';
-      toast(game, `Found ${itemName(game, data.itemId)}${amount > 1 ? ` x${amount}` : ''}!${extra}`, itemColor(game, data.itemId), 3);
+      // the HUD toasts "Found: <name>" (INVENTORY_CHANGED); world only adds the gear hint
+      if (slot === 'staff' || slot === 'robe') toast(game, 'New gear! Equip it from your inventory.', itemColor(game, data.itemId), 3);
     } else if (kind === 'health') {
       const before = st.hp;
       st.hp = Math.min(st.maxHp, st.hp + amount);
@@ -379,7 +379,7 @@ export class Geode extends Prop {
       left -= n;
       game.world.spawnPickup(game, 'fragment', this.x, this.y + 2, { element: this.element, amount: n, burst: true });
     }
-    toast(game, `The geode cracks open: ${this.amount} ${this.element} fragments!`, (ELEMENT_COLORS[this.element] || ELEMENT_COLORS.arcane)[1]);
+    toast(game, 'The geode cracks open!', (ELEMENT_COLORS[this.element] || ELEMENT_COLORS.arcane)[1], 1.6);
   }
   update(game) {
     if (!this.spent && Math.random() < 0.05) game.fx.emit('sparkle', this.x + (Math.random() - 0.5) * 10, this.y - 4 - Math.random() * 8, { element: this.element, count: 1 });

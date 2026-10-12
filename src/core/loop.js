@@ -13,6 +13,10 @@ export class GameLoop {
     this.last = 0;
     this.fps = 60;
     this.frameCount = 0;
+    /** Debug: simulated seconds per real second (?timescale=N, tests). Rendering is unaffected. */
+    this.timeScale = 1;
+    /** Rolling stats for perf tests: last frame's update+render cost in ms. */
+    this.lastWorkMs = 0;
     this.tickCount = 0;
     this._raf = 0;
     this._frame = this._frame.bind(this);
@@ -44,16 +48,20 @@ export class GameLoop {
     if (frameDt > MAX_FRAME_DT) frameDt = MAX_FRAME_DT;
     if (frameDt > 0) this.fps += (1 / frameDt - this.fps) * 0.05;
 
-    this.acc += frameDt;
+    const t0 = performance.now();
+    const scale = this.timeScale > 0 ? this.timeScale : 1;
+    this.acc += frameDt * scale;
+    const maxSteps = MAX_STEPS_PER_FRAME * Math.ceil(scale);
     let steps = 0;
-    while (this.acc >= this.dt && steps < MAX_STEPS_PER_FRAME) {
+    while (this.acc >= this.dt && steps < maxSteps) {
       this.update(this.dt);
       this.acc -= this.dt;
       this.tickCount++;
       steps++;
     }
-    if (steps >= MAX_STEPS_PER_FRAME) this.acc = 0;
+    if (steps >= maxSteps) this.acc = 0;
     this.frameCount++;
     this.render(this.acc / this.dt, frameDt);
+    this.lastWorkMs = performance.now() - t0;
   }
 }

@@ -14,6 +14,7 @@ export const ACTIONS = Object.freeze([
   'spell1', 'spell2', 'spell3', 'spell4',
   'interact', 'confirm', 'cancel',
   'inventory', 'craft', 'pause',
+  'dash', 'potion',
 ]);
 
 /** KeyboardEvent.code -> action(s). */
@@ -31,7 +32,12 @@ export const KEYMAP = Object.freeze({
   KeyI: ['inventory'], Tab: ['inventory'],
   KeyC: ['craft'],
   Escape: ['pause', 'cancel'], KeyP: ['pause'],
+  ShiftLeft: ['dash'], ShiftRight: ['dash'],
+  KeyQ: ['potion'],
 });
+
+/** Mouse button -> action(s) (button 0 is left to the UI / combat aiming). */
+export const MOUSEMAP = Object.freeze({ 2: ['dash'] });
 
 export class Input {
   /** @param {import('./display.js').Display} display */
@@ -226,7 +232,10 @@ export class Input {
         startTime: performance.now(), pointerType: evt.pointerType, claimedBy: null,
       });
       this.lastDevice = evt.pointerType === 'touch' || evt.pointerType === 'pen' ? 'touch' : 'mouse';
-      if (evt.pointerType === 'mouse') this.mouse.down = true;
+      if (evt.pointerType === 'mouse') {
+        this.mouse.down = true;
+        for (const a of MOUSEMAP[e.button] || []) this._tapLatch.add(a);
+      }
       this._gesture();
     }, { passive: false });
 

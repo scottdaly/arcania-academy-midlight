@@ -5,9 +5,15 @@ A 2D top-down pixel-art spell-crafting RPG for the browser. Vanilla JS ES module
 is synthesised with WebAudio.
 
 ```
-npm start        -> http://localhost:8080   (HOST=0.0.0.0 npm start to test on a phone over LAN)
-npm run check    -> node --check on every .js file
-npm run smoke    -> headless Chromium boot + input test, screenshots in ./screenshots/
+npm start            -> http://localhost:8080   (HOST=0.0.0.0 npm start to test on a phone over LAN)
+npm test             -> check + combat-test + dungeon-test + world-flow + smoke + playthrough (all must pass)
+npm run check        -> node --check on every .js file
+npm run smoke        -> headless Chromium boot + input test, screenshots in ./screenshots/
+npm run test:combat  -> scripts/combat-test.mjs   (plain Node: rules, AI, boss, balance bot)
+npm run test:dungeon -> scripts/dungeon-test.mjs  (plain Node: 2700 generated maps, connectivity, spawns)
+npm run test:flow    -> scripts/world-flow.mjs    (playwright: story mechanics)
+npm run playthrough  -> scripts/playthrough.mjs   (playwright: the whole campaign on desktop + phone, section 12)
+npm run perf         -> scripts/perf.mjs          (playwright: frame times under 4x CPU throttling)
 ```
 
 Every stub in the repo works today: the game boots, and the title, hub, dungeon, tower, boss,
@@ -41,7 +47,7 @@ its own folder** and keeps the exported signatures in this document.
 5. **Never throw across a boundary for missing data.** Unknown sprite key: draw a placeholder.
    Unknown spell, item or enemy id: return `null` or fall back and `console.warn`. Core wraps every
    team call in `game.guard()`, so a bug logs (at most 3 times per site) instead of stopping the loop.
-6. `npm run check && npm run smoke` must pass before you merge. The smoke test fails on **any**
+6. `npm test` (check, combat/dungeon/world tests, smoke and the full playthrough) must pass before you merge. The smoke test fails on **any**
    `console.error`, page error, 4xx/5xx response or failed request. Use `console.warn` for
    recoverable oddities.
 7. Gameplay randomness uses the seeded RNG (`game.rng`, or `new RNG(seed)` / `rng.fork(label)`).
@@ -80,7 +86,7 @@ right and bottom screen edges by less than one virtual pixel.
 | Field | Type | Notes |
 |---|---|---|
 | `game.state` | object | Saved state (§7.1). **Replaced on new game or load, so never cache it.** |
-| `game.settings` | object | `{masterVolume, musicVolume, sfxVolume, touchControls:'auto'\|'on'\|'off', screenShake, showFps}`. Call `game.saveSettings()` after edits. |
+| `game.settings` | object | `{masterVolume, musicVolume, sfxVolume, touchControls:'auto'\|'on'\|'off', screenShake, showFps, particleQuality:'low'\|'medium'\|'high'}`. Call `game.saveSettings()` after edits (it also calls `game.applySettings()`). |
 | `game.bus` | `EventBus` | `on(type, fn, owner?) → off()`, `once`, `off`, `offOwner(owner)`, `emit(type, payload)` |
 | `game.input` | `Input` | §5 |
 | `game.camera` | `Camera` | `x,y` (view centre), `left,top` (valid during render), `shake(intensity, dur)`, `screenToWorld(sx,sy)`, `worldToScreen(wx,wy)`, `isVisible(x,y,margin)`, `viewW/viewH` |
@@ -98,7 +104,9 @@ right and bottom screen edges by less than one virtual pixel.
 | `game.after(sec, fn)` | | Scene-scoped timer (cleared on scene change, paused with the world) |
 | `game.hitStop(sec)` | | Freeze world simulation briefly (max 0.2 s) |
 | `game.isGameplay()` | bool | Is the current scene hub, dungeon, tower or boss? |
-| `game.save()` | bool | Persist `game.state` (no-op before a game is started) |
+| `game.save(opts?)` | bool | Persist `game.state` (no-op before a game is started). `opts.auto` marks a background autosave (`GAME_SAVED {auto:true}`; the HUD skips its "saved" rune). |
+| `game.saveDirty` | number | Seconds until a pending autosave. Core marks it after progress events (`FLAG_CHANGED`, `SPELL_LEARNED`, `SPELL_CRAFTED`, `LOADOUT_CHANGED`, `EQUIPMENT_CHANGED`, `INVENTORY_CHANGED`, `FRAGMENTS_CHANGED`, `DUNGEON_CLEARED`, `TOWER_FLOOR_CLEARED`) and saves about 1.5 s later; it also saves on `pagehide` and when the tab is hidden. |
+| `game.applySettings()` | | Pushes core-wired settings into the modules (`particleQuality` -> `fx.setQualityCap`). Called by `saveSettings()` and at boot. |
 | `game.guard(label, fn)` | | Run fn and log (rate-limited) instead of throwing |
 | `game.params` | `URLSearchParams` | Debug URL params (§10) |
 | `game.debug` | bool | Debug overlay on (F3 toggles) |
@@ -169,7 +177,13 @@ Fx.renderWorld(ctx, camera)         // world space, AFTER lighting, so particles
 Fx.renderScreen(ctx)                // screen space overlays (flash, vignette)
 Fx.clear()                          // called by core on every scene enter
 Fx.count() -> number                // live particles (debug overlay)
+Fx.setQuality(0.25..1) / Fx.quality // particle density; adapts automatically from frame time (touch devices start at 0.7)
+Fx.setQualityCap(0.25..1)           // ceiling from settings.particleQuality (low 0.35 / medium 0.65 / high 1)
 ```
+Extended spell visuals (`spellCast`, `spellTrail`, `spellImpact`, `telegraph`, `arc`, `decal`, `aura`, `dissolve`, `shine`,
+`lightPulse`, `drawSpellOrb`) are documented in `requests/art-fx.md`. Entities tagged `projectile` get an automatic
+elemental halo and trail; set `e.drawHeight` (px above the feet; combat projectiles use 6) so the halo lines up with the
+sprite, or `e.noAutoFx = true` to opt out.
 fx **subscribes to events itself** for the standard visuals: `SPELL_CAST`, `PROJECTILE_HIT`,
 `AOE_TRIGGERED`, `ENTITY_DAMAGED`, `ENTITY_KILLED`, `PICKUP_COLLECTED`, `PLAYER_HEALED`,
 `PLAYER_DAMAGED`, `SCREEN_FLASH`, and `LEVEL_READY` (scan tiles with `TILE_DEFS[id].light` to
@@ -197,7 +211,26 @@ export function listRecipes() -> Recipe[]
 export function listItems() -> Item[]
 export function getCooldown(game, spellId) -> seconds    // player's remaining cooldown (for UI)
 export const SPELLS, RECIPES, ITEMS, ENEMIES             // raw tables, read-only for other teams
+// extras (landed from requests/combat.md)
+export const FORMS, ESSENCES, REACTIONS, STATUS_INFO, WARD_COUNTER, GEAR_DROPS
+export function recipeGrid() -> [{essence, recipes: [one per form]}]
+export function getSpellPower(game, spellId) -> number
+export function getDashCooldown(game) -> 0..1            // touch dash button
+export function requestDash(game) -> bool               // programmatic dash (the 'dash' input action is the normal path)
 ```
+- `findRecipe(elements[], form?)`: the optional form picks between recipes that share an element multiset. A repeated
+  single element (`['fire','fire']`) falls back to the pure essence; pure essences have one input (`['fire']`).
+- Spell extras: `form` ('bolt'|'volley'|'orb'|'arc'|'nova'|'rune'|'seekers'), `essence`, `colors`, `statuses[]`, `impact`,
+  `burstDamage`, `jumps`. Recipe extras: `form`, `essence`, `tier`, `name`. `FORMS[id].name` is the display name.
+- `spawnEnemy` opts: `{hpMult?, dmgMult?, elite?, affix?, noDrops?, aggro?, autoElite?, variety?}`. Difficulty scales from
+  the scene being entered (dungeon depth / tower floor): +20% HP and +8% damage per level.
+- Status types: `burn`, `chill` (build-up; 100 => `freeze`), `freeze`, `shock`, `blind`, `vulnerable`, `stun`, `slow`.
+  The player only takes burn/chill/shock/slow.
+- Entity fields other teams may read: enemy `elite`, `affix`, `displayName`, `state`, `wardEl`; boss `phase`,
+  `phaseCount` (3), `ward` (element|null), `wardHp/wardMax`, `exposedT`, `invulnerable`.
+- Enemies without line of sight (or walled off while seeing you) hunt the player along a short BFS tile path
+  (`pathStep` in `combat/enemies.js`), so they never stall behind doorway corners.
+- Combat emits `EV.SFX` `dash` (on dodge) and quiet `footstep`s while the player walks.
 Combat **owns all player gameplay**: movement (`game.input.move`), mana regen, casting on
 `spell1..4`, aiming, i-frames, death, and tile hazards (`TILE_DEFS.hazard`/`slow`). Player HP
 and mana live in **`game.state.player.hp/mana`**, not on the entity. When player HP reaches 0,
@@ -218,7 +251,10 @@ export function spawnPickup(game, kind, x, y, data?) -> Entity   // kind 'fragme
 export function openNpcDialogue(game, npcId)      // emits DIALOGUE_OPEN for that NPC's current dialogue
 export const NPCS, DIALOGUES, SPEAKERS
 export function generateDungeon(seed, depth) -> { map, rooms, ... }   // pure & deterministic (testable)
+export function getObjective(game) -> string     // one-line current story objective (HUD tracker + pause menu)
+export function getDialogue(game, id) -> Dialogue // static or built (dynamic) dialogue by id
 ```
+`spawnPickup` also accepts kind `'gear'` (an unowned staff/robe of the current tier, or arcane fragments).
 `LevelSpec` (normalised by core before `buildLevel` is called):
 - `{kind:'hub', from?: 'newGame'|'continue'|'respawn'|'dungeon'|'tower'|'debug'}`. `from` picks the spawn point.
 - `{kind:'dungeon', depth:int>=1, seed:uint32, element?}`
@@ -246,7 +282,12 @@ UI.drawText(ctx, text, x, y, opts?)   // bitmap font. opts {color, align:'left'|
 UI.measureText(text, scale?) -> px
 UI.wrapText(text, maxWidth, scale?) -> string[]
 export { drawText, measureText, wrapText }
+UI.findTarget(id) -> {x,y}|null   // virtual-px centre of a button (tests): panel hit ids, or 'touch:<action>'
+UI.touchVisible -> bool          // are the on-screen touch controls showing?
 ```
+The HUD shows the current objective (`world.getObjective`) under the vitals; it flashes when the objective changes and
+on arrival at the Academy. Toasts wrap narrower or drop below it (and the minimap) so they never overlap. The pause menu
+also shows the objective. Touch controls add a dash button (with cooldown sweep) and a potion button (with count).
 Contract details:
 - **While any panel is open, UI owns input.** After updating the top panel, call
   `input.consumeAll()` so nothing leaks into gameplay in the same tick (the stub does this).
@@ -277,17 +318,19 @@ Audio.setMuted(bool)
 Audio.update(dt)          // every tick (music sequencer)
 ```
 Audio **subscribes to events** for SFX (see the mapping in the stub) and also handles
-`EV.SFX {name, volume?, pitch?}` requests from any team. SFX names currently used:
-`cast_fire cast_ice cast_lightning cast_arcane cast_earth hit enemy_die player_hurt player_die
-pickup craft fail ui_move ui_select ui_back door boss_phase victory`. A spell's `sfx` field picks
-its cast sound. `?mute=1` starts muted.
+`EV.SFX {name, volume?, pitch?, x?, y?}` requests from any team (`x, y` in world px give stereo pan and distance fade).
+The full name list is `game.audio.names()` (57 names, e.g. `cast_<el> hit hit_armor hit_stone hit_boss enemy_die
+enemy_die_armor enemy_die_golem player_hurt player_die boss_roar boss_die boss_phase pickup_fragment pickup_health
+pickup_mana pickup_item potion equip unequip heal respawn gameover victory craft craft_add craft_charge learn fail type
+banner toast door save clear dash footstep title_start ui_open ui_close ui_error ui_tab ui_slider ui_hover`). A spell's
+`sfx` field picks its cast sound. DoT ticks (`dot: true`) play no hit sound. `?mute=1` starts muted.
 
 ---
 
 ## 5. Input
 
 Actions (`ACTIONS` in `core/input.js`):
-`up down left right spell1 spell2 spell3 spell4 interact confirm cancel inventory craft pause`
+`up down left right spell1 spell2 spell3 spell4 interact confirm cancel inventory craft pause dash potion`
 
 | Key | Actions |
 |---|---|
@@ -300,6 +343,8 @@ Actions (`ACTIONS` in `core/input.js`):
 | C | craft |
 | Esc | pause + cancel |
 | P | pause |
+| Shift (either), right mouse button | dash (`MOUSEMAP` maps pointer buttons to actions) |
+| Q | potion (quaff a Health Potion, else an Elixir) |
 | Backspace | cancel |
 | F3 | debug overlay (core) |
 
@@ -336,7 +381,7 @@ plain objects. **Team-private events must be prefixed with the folder name** (fo
 | `LEVEL_READY` | core | `{level, spec}`, after `buildLevel` + player spawn |
 | `GAME_NEW` | core | `{state}`. **Seed starting data here** (combat: gear, spells, loadout; world: flags) |
 | `GAME_LOADED` | core | `{state}` |
-| `GAME_SAVED` | core | `{ok}` |
+| `GAME_SAVED` | core | `{ok, auto}` (`auto` = background autosave) |
 | `SAVE_REQUEST` | anyone | `{}` |
 | `HIT_STOP` | anyone | `{duration}` |
 | `CAMERA_SHAKE` | anyone | `{intensity, duration}` (respects `settings.screenShake`) |
@@ -344,7 +389,7 @@ plain objects. **Team-private events must be prefixed with the folder name** (fo
 | `UI_OPENED` / `UI_CLOSED` | ui | `{panel, data}` / `{panel}` |
 | `TOAST` | anyone | `{text, color?, duration?}` |
 | `PLAYER_SPAWNED` | core | `{player}` |
-| `PLAYER_DAMAGED` | combat | `{amount, element, source, hp, maxHp}` |
+| `PLAYER_DAMAGED` | combat | `{amount, element, source, hp, maxHp, dot}` |
 | `PLAYER_HEALED` | combat / world | `{amount, hp, maxHp}` |
 | `PLAYER_DIED` | combat | `{killer}`. Emit exactly once; core shows game over after 1.6 s |
 | `PLAYER_RESPAWNED` | core | `{}`. HP and mana already restored |
@@ -357,7 +402,7 @@ plain objects. **Team-private events must be prefixed with the folder name** (fo
 | `LOADOUT_CHANGED` | core state helper | `{slot, spellId, loadout}` |
 | `PROJECTILE_HIT` | combat | `{projectile, target\|null, x, y, element}` (`target` is null on a wall hit or expiry) |
 | `AOE_TRIGGERED` | combat | `{x, y, radius, element, spellId}` |
-| `ENTITY_DAMAGED` | combat | `{target, amount, element, source, crit, x, y}` (non-player targets) |
+| `ENTITY_DAMAGED` | combat | `{target, amount, element, source, crit, x, y, reaction, blocked, dot}` (non-player targets; `reaction` is 'SHATTER', 'OVERLOAD', 'MELT', 'SUPERCONDUCT', 'QUENCH' or null) |
 | `ENTITY_KILLED` | combat | `{target, killer, x, y}` |
 | `ENEMY_SPAWNED` | combat | `{enemy, defId}` |
 | `STATUS_APPLIED` / `STATUS_EXPIRED` | combat | `{target, status}` |
@@ -374,7 +419,7 @@ plain objects. **Team-private events must be prefixed with the folder name** (fo
 | `DUNGEON_CLEARED` | world | `{depth, seed}` |
 | `TOWER_FLOOR_CLEARED` | world | `{floor}` |
 | `SCREEN_FLASH` | anyone | `{color, duration, alpha}` |
-| `SFX` | anyone | `{name, volume?, pitch?}` |
+| `SFX` | anyone | `{name, volume?, pitch?, x?, y?}` |
 | `GAME_OVER` / `VICTORY` | core | `{}` (just before entering those scenes) |
 
 Listeners run synchronously in subscription order. A throwing listener is logged and skipped.
@@ -476,8 +521,15 @@ liquid, hazard:{element,dps}|null, slow, light:{radius,color,flicker}|null, anim
 but not `blocksShot`). New tiles go through requests.
 
 ### 7.6 Story flags (world owns the keys; others may read them)
-`metHeadmaster`, `alchemistGift`, `dungeonCleared`, `towerFloor<N>Cleared`, `archmageDefeated`
-(set by core on victory). Add new flags freely inside world and list them here through a request.
+All booleans, set through `setFlag`.
+- Main arc: `metHeadmaster` -> `forgeGift` -> `firstCraft` (set on SPELL_CRAFTED) -> `reachedDepth<N>` (every depth entered)
+  -> `dungeonCleared` / `clearedDepth<N>` -> `towerUnlocked` (Headmaster; needs `reachedDepth3` + `firstCraft`)
+  -> `towerFloor<N>Cleared` (N = 1..5) -> `archmageDefeated` (set by core on victory).
+- Side: `visitedLibrary`, `metArtificer`, `rivalMet`, `rivalBet`, `rivalBetWon`, `shyQuest`, `foundTome`, `shyQuestDone`,
+  `catGift`, `corvinGift`, `artificerGift2`, `secretFound`. (`alchemistGift` is no longer used.)
+- World also maintains `state.tower.highestFloor/currentFloor` (tier-3 recipes gate on `towerFloor`) and
+  `state.dungeon.runs/deepest/lastSeed`. Tower stairs carry crafted-spell wards: floor 3 needs 1 crafted spell, floor 5 needs 2.
+- Private world event: `world:buy {itemId, cost}` (quartermaster). Add new flags freely inside world and list them here.
 
 ### 7.7 Dialogue
 ```js
@@ -570,7 +622,9 @@ Math helpers are in `core/math.js` and the RNG (`RNG`, `hashString`) is in `core
 ## 10. Debug URL parameters
 `?debug=1` (overlay, also F3) · `?scene=hub|dungeon|tower|boss` (fresh game, skip the title) ·
 `?depth=N` · `?floor=N` · `?seed=N` · `?continue=1` · `?touch=1` (force touch controls with a
-mouse) · `?mute=1` · `?debugbus=1` (log every event).
+mouse) · `?mute=1` · `?debugbus=1` (log every event) · `?timescale=N` (simulate N x faster, max 16; rendering
+is unaffected; used by the playthrough test). `game.loop.timeScale` and `game.loop.lastWorkMs` (update + render cost of
+the last frame, ms) are exposed for tests.
 Example: `http://localhost:8080/?scene=tower&floor=5&debug=1`.
 
 ## 11. Performance budget (mobile first)
@@ -578,3 +632,13 @@ Target 60 fps on a mid-range phone at about 633×292 virtual px. Avoid per-frame
 hot loops. Cache generated canvases. Keep `createRadialGradient` usage modest (fx), keep particles
 under about 1200, and keep entities under about 300. Static tiles are chunk-cached by core, so do
 not redraw the map yourself.
+
+## 12. End-to-end tests
+
+`scripts/playthrough.mjs` plays the whole campaign in headless Chromium on a desktop viewport (1280x720, keyboard +
+mouse) and a phone viewport (844x390 landscape, DPR 3, touch only): New Game from the title, walk to the Headmaster and
+Forge-Master (keys / virtual joystick), talk, craft with the Forge UI, equip gear in the bag, cast / dash / quaff with real
+inputs, crawl depths 1-3, die and respawn at the Academy, unlock the tower, reload and Continue, climb floors 1-5, defeat
+the Corrupted Archmage and reach the victory screen. Long fights use `scripts/lib/bot.js`, an autopilot registered as an
+InputSource (section 5), so it drives the same input pipeline as the keyboard and the touch controls and never edits state.
+Screenshots go to `screenshots/_play/`. `scripts/perf.mjs` measures frame cost under DevTools CPU throttling (4x).

@@ -8,6 +8,7 @@
 //   ?continue=1              skip the title and continue the saved game
 //   ?touch=1                 force on-screen touch controls on desktop (ui honours this)
 //   ?mute=1                  start muted (audio honours this)
+//   ?timescale=4             debug: simulate N x faster (headless playthrough tests)
 import { createGame, startNewGame, continueGame, GAMEPLAY_SCENES } from './core/game.js';
 import { sceneRegistry } from './scenes/index.js';
 import * as art from './art/index.js';
@@ -43,6 +44,8 @@ async function boot() {
     startNewGame(game, scene, { from: 'debug', depth: p.get('depth'), floor: p.get('floor'), seed: p.get('seed') });
   } else game.scenes.go('title');
 
+  const ts = Number(p.get('timescale'));
+  if (ts > 0) game.loop.timeScale = Math.min(16, ts);
   game.loop.start();
 }
 

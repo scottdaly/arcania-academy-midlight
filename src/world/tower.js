@@ -232,7 +232,7 @@ export function buildTowerFloor(game, spec) {
       setFlag(g, `towerFloor${floor}Cleared`, true);
       g.bus.emit(EV.TOWER_FLOOR_CLEARED, { floor });
       g.bus.emit(EV.SFX, { name: 'door' });
-      g.bus.emit(EV.TOAST, { text: top ? 'The way to the summit is open...' : 'Floor cleared! The stairs unseal.', color: '#ffd25a', duration: 3 });
+      // (the HUD shows a "Floor N Cleared!" banner)
       const cp = C(gen.chest.tx, gen.chest.ty);
       const chest = g.entities.add(new Chest(cp.x + 8, cp.y + 3, { drops: rollChest(g, new RNG(`tower-loot:${floor}:${t.highestFloor}`), def.reward, { fire: 1, ice: 1, lightning: 1, arcane: 1, earth: 1 }) }));
       g.fx.ring(chest.x, chest.y - 4, 28, '#ffd25a', 0.6);

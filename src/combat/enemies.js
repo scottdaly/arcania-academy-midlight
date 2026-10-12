@@ -10,6 +10,37 @@ import { Telegraph, Shockwave, Zone, Meteor, ArcVisual, Corpse, inShape, burst }
 import { enemyShoot } from './spells.js';
 import { difficulty, angleDiff, turnToward, colorsOf, fx, sfx, shake, fillDisc, strokeDisc } from './util.js';
 
+// Small BFS (8-way, no corner cutting) from the player's tile outward; returns the centre of the
+// next tile an enemy at (fx, fy) should step to, or null. Bounded so it stays cheap.
+const PATH_MAX = 1400;
+let pathPrev = null, pathQ = null;
+function pathStep(map, fx, fy, tx, ty) {
+  const W = map.w, H = map.h, N = W * H;
+  if (!pathPrev || pathPrev.length < N) { pathPrev = new Int32Array(N); pathQ = new Int32Array(N); }
+  const sx = Math.floor(fx / 16), sy = Math.floor(fy / 16), gx = Math.floor(tx / 16), gy = Math.floor(ty / 16);
+  if (sx === gx && sy === gy) return null;
+  const goal = gy * W + gx, start = sy * W + sx;
+  const seen = new Map();
+  let qh = 0, qt = 0;
+  pathQ[qt++] = goal; seen.set(goal, -1);
+  while (qh < qt && qt < PATH_MAX) {
+    const c = pathQ[qh++], cx = c % W, cy = (c / W) | 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const nx = cx + dx, ny = cy + dy;
+      if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+      const n = ny * W + nx;
+      if (seen.has(n)) continue;
+      if (n !== start && map.isSolid(nx, ny, 'walk')) continue;
+      if (dx && dy && (map.isSolid(cx + dx, cy, 'walk') || map.isSolid(cx, cy + dy, 'walk'))) continue;
+      seen.set(n, c);
+      if (n === start) return { x: cx * 16 + 8, y: cy * 16 + 8 }; // the tile we came from leads to the player
+      pathQ[qt++] = n;
+    }
+  }
+  return null;
+}
+
 const TAU = Math.PI * 2;
 const AFFIXES = ['swift', 'warded', 'volatile', 'frenzied'];
 const AFFIX_NAMES = { swift: 'Swift', warded: 'Warded', volatile: 'Volatile', frenzied: 'Frenzied' };
@@ -120,7 +151,8 @@ export class Enemy extends Entity {
     if (this.aggro && game.camera?.isVisible?.(this.x, this.y, 16)) {
       fx(game, 'addLight', this.x, this.y - 8, this.elite ? 30 : 22, this.elite ? '#ffb03a' : colorsOf(this.def.element)[0], 0.35);
     }
-    this.anim = this.state === 'windup' || this.state === 'strike' || this.state === 'charge' ? 'attack' : this.moving ? 'walk' : 'idle';
+    const anim = this.state === 'windup' || this.state === 'strike' || this.state === 'charge' ? 'attack' : this.moving ? 'walk' : 'idle';
+    if (anim !== this.anim) { this.anim = anim; this.animT0 = this.age; } // one-shot anims start at frame 0
   }
 
   /** Perception: distance, angle and line of sight to the player; handles aggro. */
@@ -166,10 +198,32 @@ export class Enemy extends Entity {
     } else this.stuckT = 0;
   }
 
-  /** Approach the player, or their last seen position when out of sight. */
+  /**
+   * Approach the player: straight at them with line of sight, else to their last seen position,
+   * else along a short tile path (so foes never stall behind a doorway corner).
+   */
   approach(game, dt, c, mul = 1) {
-    if (c.los) this.moveDir(game, c.dx, c.dy, mul, dt);
-    else if (this.lastSeen) {
+    this.pathLock = Math.max(0, (this.pathLock || 0) - dt);
+    if (c.los && this.pathLock <= 0) {
+      this.moveDir(game, c.dx, c.dy, mul, dt);
+      if (this.stuckT > 0.3) { this.pathLock = 1.2; this.pathWp = null; } // walled off despite seeing you: go around
+      return;
+    }
+    // No line of sight: an aggro'd foe hunts the player along a short tile path (never stalls behind a
+    // doorway corner); the last seen position is only a fallback when no path is found.
+    const p = game.player;
+    this.pathT = (this.pathT || 0) - dt;
+    if (p && (this.pathT <= 0 || !this.pathWp)) {
+      this.pathT = 0.35 + Math.random() * 0.2;
+      this.pathWp = pathStep(game.level.map, this.x, this.y, p.x, p.y);
+    }
+    const w = this.pathWp;
+    if (w) {
+      const dx = w.x - this.x, dy = w.y - this.y;
+      if (Math.hypot(dx, dy) < 3) this.pathWp = null;
+      else { this.moveDir(game, dx, dy, mul, dt); return; }
+    }
+    if (this.lastSeen) {
       const dx = this.lastSeen.x - this.x, dy = this.lastSeen.y - this.y;
       if (Math.hypot(dx, dy) > 6) this.moveDir(game, dx, dy, mul, dt);
       else this.lastSeen = null;
@@ -376,7 +430,7 @@ export class Enemy extends Entity {
       if (sh) top = y + bob - sh.ay;
       const tele = this.state === 'windup' && this.stateT < 0.12;
       art.drawSprite(ctx, key, x, y + bob, {
-        anim: frozen ? 'hurt' : this.anim, t: frozen ? 0 : this.age, flip: Math.cos(this.facing) < 0, dir: this.dirName(),
+        anim: frozen ? 'hurt' : this.anim, t: frozen ? 0 : this.age - (this.animT0 || 0), flip: Math.cos(this.facing) < 0, dir: this.dirName(),
         flash: this.hurtFlash > 0 ? 1 : tele ? 0.6 : 0,
       });
     } else {

@@ -8,7 +8,7 @@
 // reserved rects (ui.touch.reserved) whenever they are visible.
 import { EV } from '../core/events.js';
 import { ELEMENTS, CORE_ELEMENTS, TOWER_FLOORS } from '../core/config.js';
-import { drawText, measureText } from './font.js';
+import { drawText, measureText, wrapText } from './font.js';
 import {
   COL, bar, drawEmblem, drawSweep, keycap, elColor, rarityOf, clamp, easeOutBack, easeOutCubic, mix, rrect,
 } from './theme.js';
@@ -77,6 +77,8 @@ export function createHud(game, ui) {
   const fragToast = {};
   let manaToastAt = -9;
   let lowT = 0;
+  /** objective tracker (world.getObjective): cached text, wrapped lines, highlight when it changes */
+  const quest = { text: '', lines: [], w: 0, flash: 0, checkT: 0 };
 
   const layout = {
     vitals: { x: 0, y: 0, w: 0, h: 0 },
@@ -84,6 +86,7 @@ export function createHud(game, ui) {
     minimap: { x: 0, y: 0, w: 0, h: 0 },
     boss: { x: 0, y: 0, w: 0, h: 0 },
     spellbar: { x: 0, y: 0, w: 0, h: 0 },
+    quest: { x: 0, y: 0, w: 0, h: 0 },
     /** Suggested top y for toasts so they never cover the HUD's top rows. */
     toastY: 30,
   };
@@ -215,7 +218,9 @@ export function createHud(game, ui) {
     boss.shake = 1;
   });
   bus.on(EV.BOSS_DEFEATED, () => { if (boss.ent && !boss.defeated) boss.defeated = 0.0001; });
-  bus.on(EV.GAME_SAVED, ({ ok } = {}) => { if (ok && game.isGameplay()) saveT = 1.4; });
+  // highlight the objective tracker whenever we arrive back at the Academy
+  bus.on(EV.LEVEL_READY, ({ level } = {}) => { if (level?.kind === 'hub') { quest.flash = 1; quest.checkT = 0; } });
+  bus.on(EV.GAME_SAVED, ({ ok, auto } = {}) => { if (ok && !auto && game.isGameplay()) saveT = 1.4; });
 
   function adoptBoss(b) {
     boss.ent = b;
@@ -574,6 +579,25 @@ export function createHud(game, ui) {
 
   // ------------------------------------------------------------------ save indicator
 
+  function drawObjective(ctx, x, y, maxW) {
+    const dt = 1 / 60;
+    quest.flash = Math.max(0, quest.flash - dt / 3);
+    if ((quest.checkT -= dt) <= 0) {
+      quest.checkT = 0.5;
+      const txt = game.guard('world.getObjective', () => game.world.getObjective?.(game)) || '';
+      if (txt !== quest.text) { if (quest.text) quest.flash = 1; quest.text = txt; quest.w = -1; }
+    }
+    if (!quest.text || game.level?.kind === 'boss') return 0;
+    if (quest.w !== maxW) { quest.w = maxW; quest.lines = wrapText(quest.text, maxW - 14).slice(0, 3); }
+    const lw = Math.max(...quest.lines.map((l) => measureText(l)));
+    const h = quest.lines.length * 8 + 5;
+    quest.pw = lw + 18;
+    plate(ctx, x, y, lw + 18, h, quest.flash > 0 ? `rgba(255,210,90,${(0.25 + 0.5 * quest.flash).toFixed(2)})` : 'rgba(200,184,255,0.18)', 0.72);
+    drawMask(ctx, 'star', x + 3, y + 3, COL.gold, COL.goldHi, '#b07a20');
+    quest.lines.forEach((l, i) => drawText(ctx, l, x + 13, y + 3 + i * 8, { color: quest.flash > 0 ? COL.goldHi : '#d8d0f0', shadow: COL.ink }));
+    return h;
+  }
+
   function drawSave(ctx, x, y) {
     if (saveT <= 0) return;
     const a = Math.min(1, saveT / 0.4) * Math.min(1, (1.4 - saveT) / 0.15);
@@ -607,7 +631,10 @@ export function createHud(game, ui) {
     const fy = fragRight ? vy + 1 : vy + vb.h + 4;
     drawFragments(ctx, fx, fy, els, fw);
     setRect(layout.fragments, fx, fy, fw, FRAG_H);
-    const leftBottom = fragRight ? vy + vb.h : fy + FRAG_H;
+    let leftBottom = fragRight ? vy + vb.h : fy + FRAG_H;
+    // current objective (under the vitals / fragments)
+    const qh = drawObjective(ctx, vx, leftBottom + 4, clamp(Math.round(W * (touchOn ? 0.36 : 0.3)), 110, 190));
+    if (qh) { setRect(layout.quest, vx, leftBottom + 4, quest.pw, qh); leftBottom += qh + 4; } else setRect(layout.quest, 0, 0, 0, 0);
 
     // minimap (top-right, under the fragments or the touch buttons)
     const trRect = res?.topRight;

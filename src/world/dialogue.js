@@ -562,12 +562,11 @@ export function installDialogueActions(game) {
       case 'giveItem': {
         if (!game.combat?.getItem?.(a.itemId)) { console.warn('[world] giveItem: unknown item', a.itemId); break; }
         addItem(game, a.itemId, a.qty ?? 1);
-        toast(`Received ${itemName(game, a.itemId)}${(a.qty ?? 1) > 1 ? ` x${a.qty}` : ''}`, '#ffd25a');
+        // (the HUD toasts "Found: <name>" from INVENTORY_CHANGED)
         break;
       }
       case 'giveFragments':
         addFragments(game, a.element, a.amount ?? 1);
-        toast(`+${a.amount ?? 1} ${a.element} fragments`, '#ffd25a');
         break;
       case 'learnSpell': learnSpell(game, a.spellId); break;
       case 'heal': {

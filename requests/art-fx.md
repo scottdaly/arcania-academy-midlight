@@ -32,7 +32,13 @@
   - Set `e.noAutoFx = true` on an entity to opt out.
 - Legacy `fx.emit(preset, x, y, {element, ...})` still works. When an element is given, it uses that element's signature.
 
-## combat: small hookups for nicer visuals   (status: open)
+## combat: small hookups for nicer visuals   (status: done)
+- Resolution (core, integration): 1. enemies already pass `dir`; the player relies on art's facing fallback; the boss passes
+  `phase`. 2. Combat no longer emits its own per-tick `trail` particles and dropped the square trail in
+  `Projectile.renderGlow`; fx's automatic per-element halo (the drawSpellOrb look) is used instead. Projectiles now set
+  `drawHeight = 6` and fx offsets the auto halo/trail by it, so the glow sits on the projectile instead of 6 px below it.
+  3. One-shot anims restart at frame 0: enemies track `animT0` when their anim changes, the player resets `animT`
+  (cast/hurt/die). 4. Signature casts/impacts already come from the events.
 - What:
   1. Pass `{dir: 'up'|'down'|'side'}` to `art.drawSprite` for wizard-like sheets (sheets with `dirs: true`)
      and `{phase: 2}` for the boss. The player and boss fall back to `game.player.facingX/Y` and `boss.phase`.

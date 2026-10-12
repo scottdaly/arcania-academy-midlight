@@ -123,7 +123,7 @@ export const ENEMIES = {
   },
   armor_sentinel: {
     id: 'armor_sentinel', name: 'Halberd Sentinel', sprite: 'enemy_sentinel', fallbackSprite: 'enemy_knight_captain', hp: 120, speed: 26, radius: 7, mass: 6,
-    damage: 18, attack: { type: 'melee', range: 42, cooldown: 2.2, windup: 0.85 }, aggroRange: 130, ai: 'sentinel',
+    damage: 15, attack: { type: 'melee', range: 42, cooldown: 2.4, windup: 0.85 }, aggroRange: 130, ai: 'sentinel',
     resist: { fire: 0.8 }, element: 'physical', armored: true, shield: 'guard', poise: 40, superArmor: true, leash: 90,
     drops: [frag('arcane', 0.8, 1, 2), frag('lightning', 0.4, 1), { kind: 'gear', chance: 0.08 }],
   },

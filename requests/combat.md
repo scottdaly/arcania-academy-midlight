@@ -2,7 +2,9 @@
 
 <!-- Append entries below (see README.md for the format). -->
 
-## Input action `dash`            (status: open)
+## Input action `dash`            (status: done)
+- Resolution: `ACTIONS += dash`, Shift (either) and the right mouse button (`MOUSEMAP` in core/input.js); touch dash button
+  with cooldown sweep. Combat's private keydown/pointer listeners were removed; it reads `input.pressed('dash')`.
 - What: new input action `dash` — keys ShiftLeft/ShiftRight, right mouse button; a touch button (UI).
 - Why: the dodge-dash (0.17 s, 0.24 s i-frames, 0.85 s cooldown) is core to reading telegraphs and the boss's patterns.
 - Proposed shape: `ACTIONS += 'dash'`, `KEYMAP.ShiftLeft = ['dash']`, `KEYMAP.ShiftRight = ['dash']`; core maps pointer button 2 to `dash`.
@@ -10,13 +12,15 @@
   It already honours `input.pressed('dash')` as soon as the action exists. Touch UI can call
   `game.combat.requestDash(game)` and draw cooldown from `game.combat.getDashCooldown(game)` (0..1).
 
-## Input action `potion`          (status: open)
+## Input action `potion`          (status: done)
+- Resolution: `ACTIONS += potion`, key Q; touch potion button showing the potion count. Private KeyQ listener removed.
 - What: new input action `potion` (key Q; touch button) = quaff a Health Potion (falls back to Elixir).
 - Why: healing mid-fight without opening the inventory panel (the world freezes while it is open, which is fine but slow).
 - Proposed shape: `ACTIONS += 'potion'`, `KEYMAP.KeyQ = ['potion']`.
 - Workaround in the meantime: combat listens for KeyQ itself and honours `input.pressed('potion')` when it lands.
 
-## Contract doc updates (ARCHITECTURE.md §4.3 / §6 / §7)   (status: open)
+## Contract doc updates (ARCHITECTURE.md §4.3 / §6 / §7)   (status: done)
+- Resolution: all of the below is now in ARCHITECTURE.md §4.3 and §6.
 - `findRecipe(elements[], form?)`: optional 2nd arg picks the delivery form; several recipes share an element
   multiset (one per form). A repeated single element (`['fire','fire']`) falls back to the pure essence.
   Pure essences have ONE input element (`inputs: ['fire']`); Void uses `['arcane','arcane','arcane']`.
@@ -36,7 +40,10 @@
 - Entity fields other teams may read: enemy `elite`, `affix`, `displayName`, `state`, `wardEl`; boss `phase`,
   `ward` (element|null), `wardHp/wardMax`, `exposedT`, `invulnerable`.
 
-## SFX name `dash`                (status: open — for ui-audio)
+## SFX name `dash`                (status: done)
+- Resolution: audio already had `dash` and `footstep`; combat now also emits quiet `footstep`s. Audio skips the hit sound
+  for `ENTITY_DAMAGED {dot:true}` and plays a quiet `player_hurt` for `PLAYER_DAMAGED {dot:true}`; the UI already drew
+  small grey numbers for DoT ticks.
 - What: combat emits `EV.SFX {name:'dash'}` on dodge. Currently silently ignored.
 - Also: DoT ticks emit `ENTITY_DAMAGED` with `dot: true` (and `PLAYER_DAMAGED` with `dot: true`); audio/ui may want to
   skip the 'hit' sound / big damage numbers for those.
