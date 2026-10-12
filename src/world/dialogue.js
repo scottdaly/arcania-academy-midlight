@@ -471,8 +471,11 @@ export const BUILDERS = {
       'Mana runs dry fast. Mix cheap bolts with your big spells, and keep a mana potion handy.',
       'Tobbin trades gear for fragments. A better robe might be all you need.',
     ]);
+    // never send a struggling student back out empty-handed: top up to 2 health potions
+    const have = game.state.inventory.find((s) => s.id === 'potion_health')?.qty || 0;
+    const gift = have < 2 ? [{ type: 'giveItem', itemId: 'potion_health', qty: 2 - have }] : [];
     return dlg('healer_respawn', {
-      a: say('healer', opener, 'b', [HEAL]),
+      a: say('healer', gift.length ? `${opener} Here, take a potion or two for the road.` : opener, 'b', [HEAL, ...gift]),
       b: say('healer', tip, null),
     });
   },

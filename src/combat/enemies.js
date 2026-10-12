@@ -329,7 +329,7 @@ export class Enemy extends Entity {
     }
     if (mode === 'front') {
       if (!front) return 1;
-      return hit.element === 'lightning' ? 0.55 : 0.15;
+      return hit.element === 'lightning' ? 0.6 : 0.3;
     }
     // halberd guard: everything is halved, the front is walled off
     return front ? (hit.element === 'lightning' ? 0.55 : 0.2) : 0.6;

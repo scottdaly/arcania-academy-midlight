@@ -48,19 +48,19 @@ export const ITEMS = {
   // ---- staves ----
   staff_apprentice: { id: 'staff_apprentice', name: 'Apprentice Staff', slot: 'staff', rarity: 'common', stats: { manaRegen: 0.5 }, description: 'Standard issue. Smells of chalk.' },
   staff_oak: { id: 'staff_oak', name: 'Oaken Staff', slot: 'staff', rarity: 'common', stats: { manaRegen: 1.5, spellPower: 0.05 }, description: 'Sturdy and reliable.' },
-  staff_ember: { id: 'staff_ember', name: 'Ember Staff', slot: 'staff', rarity: 'rare', stats: { spellPower: 0.1, elementPower: { fire: 0.3 } }, description: 'Warm to the touch. +30% fire.' },
+  staff_ember: { id: 'staff_ember', name: 'Ember Staff', slot: 'staff', rarity: 'rare', stats: { manaRegen: 1, spellPower: 0.1, elementPower: { fire: 0.3 } }, description: 'Warm to the touch. +30% fire.' },
   staff_frostbite: { id: 'staff_frostbite', name: 'Frostbite Rod', slot: 'staff', rarity: 'rare', stats: { manaRegen: 1, cooldownMult: -0.08, elementPower: { ice: 0.3 } }, description: 'Rimed in eternal frost. +30% ice.' },
-  staff_geode: { id: 'staff_geode', name: 'Geode Maul', slot: 'staff', rarity: 'rare', stats: { maxHp: 20, spellPower: 0.05, elementPower: { earth: 0.35 } }, description: 'Half staff, half boulder. +35% earth.' },
+  staff_geode: { id: 'staff_geode', name: 'Geode Maul', slot: 'staff', rarity: 'rare', stats: { manaRegen: 1, maxHp: 20, spellPower: 0.05, elementPower: { earth: 0.35 } }, description: 'Half staff, half boulder. +35% earth.' },
   staff_stormcaller: { id: 'staff_stormcaller', name: 'Stormcaller', slot: 'staff', rarity: 'epic', stats: { manaRegen: 3, elementPower: { lightning: 0.3 } }, description: 'Hums before a storm. +30% lightning.' },
-  staff_prism: { id: 'staff_prism', name: 'Prism Staff', slot: 'staff', rarity: 'epic', stats: { spellPower: 0.15, cooldownMult: -0.1, elementPower: { fire: 0.1, ice: 0.1, lightning: 0.1 } }, description: 'Splits light, and spells, three ways.' },
+  staff_prism: { id: 'staff_prism', name: 'Prism Staff', slot: 'staff', rarity: 'epic', stats: { manaRegen: 2, spellPower: 0.15, cooldownMult: -0.1, elementPower: { fire: 0.1, ice: 0.1, lightning: 0.1 } }, description: 'Splits light, and spells, three ways.' },
   staff_archmage: { id: 'staff_archmage', name: 'Staff of the First Archmage', slot: 'staff', rarity: 'legendary', stats: { spellPower: 0.3, manaRegen: 3, cooldownMult: -0.15 }, description: 'It remembers every spell ever cast with it.' },
   // ---- robes ----
   robe_novice: { id: 'robe_novice', name: 'Novice Robe', slot: 'robe', rarity: 'common', stats: { manaRegen: 0.5 }, description: 'Academy blue.' },
   robe_scholar: { id: 'robe_scholar', name: 'Scholar Robe', slot: 'robe', rarity: 'rare', stats: { manaRegen: 2, maxMana: 20 }, description: 'Ink-stained but enchanted.' },
-  robe_emberweave: { id: 'robe_emberweave', name: 'Emberweave Robe', slot: 'robe', rarity: 'rare', stats: { maxHp: 15, elementPower: { fire: 0.15 } }, description: 'Never quite stops smouldering.' },
+  robe_emberweave: { id: 'robe_emberweave', name: 'Emberweave Robe', slot: 'robe', rarity: 'rare', stats: { manaRegen: 1, maxHp: 15, elementPower: { fire: 0.15 } }, description: 'Never quite stops smouldering.' },
   robe_frostweave: { id: 'robe_frostweave', name: 'Frostweave Robe', slot: 'robe', rarity: 'rare', stats: { maxMana: 15, manaRegen: 1, elementPower: { ice: 0.15 } }, description: 'Cool, calm, collected.' },
-  robe_stormweave: { id: 'robe_stormweave', name: 'Stormweave Cloak', slot: 'robe', rarity: 'rare', stats: { moveSpeed: 10, cooldownMult: -0.05, elementPower: { lightning: 0.15 } }, description: 'Crackles when you run.' },
-  robe_battlemage: { id: 'robe_battlemage', name: 'Battlemage Coat', slot: 'robe', rarity: 'epic', stats: { maxHp: 40, spellPower: 0.08 }, description: 'Chainmail sewn into silk.' },
+  robe_stormweave: { id: 'robe_stormweave', name: 'Stormweave Cloak', slot: 'robe', rarity: 'rare', stats: { manaRegen: 1, moveSpeed: 10, cooldownMult: -0.05, elementPower: { lightning: 0.15 } }, description: 'Crackles when you run.' },
+  robe_battlemage: { id: 'robe_battlemage', name: 'Battlemage Coat', slot: 'robe', rarity: 'epic', stats: { manaRegen: 1.5, maxHp: 40, spellPower: 0.08 }, description: 'Chainmail sewn into silk.' },
   robe_archmage: { id: 'robe_archmage', name: 'Archmage Vestments', slot: 'robe', rarity: 'legendary', stats: { manaRegen: 4, maxMana: 50, maxHp: 25 }, description: 'Woven from starlight.' },
   // ---- consumables ----
   potion_health: { id: 'potion_health', name: 'Health Potion', slot: 'consumable', rarity: 'common', use: { heal: 40 }, description: 'Restores 40 HP. (Q to quaff)' },
@@ -176,7 +176,7 @@ export const ENEMIES = {
   },
   // ---------------- boss ----------------
   corrupted_archmage: {
-    id: 'corrupted_archmage', name: 'The Corrupted Archmage', sprite: 'boss_archmage', hp: 1500, speed: 34, radius: 9, mass: Infinity,
+    id: 'corrupted_archmage', name: 'The Corrupted Archmage', sprite: 'boss_archmage', hp: 1350, speed: 34, radius: 9, mass: Infinity,
     damage: 12, attack: { type: 'ranged', range: 300, cooldown: 1.2, windup: 0.6, spellId: 'boss_bolt' }, aggroRange: 400, ai: 'boss',
     resist: { arcane: 0.5 }, element: 'arcane', boss: true, poise: Infinity, freezeResist: 0,
     drops: [],

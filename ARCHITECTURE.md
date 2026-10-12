@@ -486,7 +486,7 @@ Item  { id, name, description, icon: 'item_<id>', rarity: 'common'|'rare'|'epic'
 Enemy { id, name, sprite, hp, speed, radius, mass, damage,
         attack: { type: 'melee'|'ranged', range, cooldown, windup, spellId? },
         aggroRange, ai: 'chaser'|'brute'|'ranged'|'boss', element,
-        resist: { [el]: multiplier },   // missing = 1, 0 = immune, >1 = weak
+        resist: { [el]: multiplier },   // missing = 1, 0 = immune, >1 = weak; a fusion hit uses the average over its elements
         drops: [ { kind: 'fragment'|'health'|'mana'|'item', element?, itemId?, chance, min, max } ],
         boss?: true }
 ```
@@ -642,3 +642,6 @@ inputs, crawl depths 1-3, die and respawn at the Academy, unlock the tower, relo
 the Corrupted Archmage and reach the victory screen. Long fights use `scripts/lib/bot.js`, an autopilot registered as an
 InputSource (section 5), so it drives the same input pipeline as the keyboard and the touch controls and never edits state.
 Screenshots go to `screenshots/_play/`. `scripts/perf.mjs` measures frame cost under DevTools CPU throttling (4x).
+Run one viewport with `VP=desktop|phone`, watch it with `HEADED=1`, slow it with `TIMESCALE=2` (default 4). The bot's
+deaths are real deaths (game over -> Rise Again -> healer), so a run usually dies several times before the Archmage
+falls; the run fails only on a failed check, a console/page error, a failed request or a stall.

@@ -1,6 +1,6 @@
 // Damage, status effects, elemental reactions, derived stats, crafting, items (team: combat).
 import { EV } from '../core/events.js';
-import { spendFragments, hasFragments, learnSpell, removeItem, checkRequirements, clampVitals } from '../core/state.js';
+import { spendFragments, hasFragments, learnSpell, removeItem, checkRequirements, clampVitals, setFlag } from '../core/state.js';
 import { SPELLS, RECIPES, ITEMS } from './data.js';
 import { Zone, FloatText, burst } from './effects.js';
 import { fx, sfx, shake, hitStop, colorsOf, isTarget } from './util.js';
@@ -83,8 +83,10 @@ export function damage(game, target, hit) {
     return 0;
   }
 
-  let mult = def.resist?.[element] ?? 1;
-  if (target.resistMod?.[element] != null) mult *= target.resistMod[element];
+  // fusion spells resist as the average of their elements (Steam still scalds a fire-immune wisp)
+  const resOf = (el) => (def.resist?.[el] ?? 1) * (target.resistMod?.[el] ?? 1);
+  const els = hit.elements?.length > 1 && !hit.dot ? hit.elements : null;
+  let mult = els ? els.reduce((a, el) => a + resOf(el), 0) / els.length : resOf(element);
   if (mult <= 0) {
     if (!hit.dot && (target._immuneT || 0) < game.time) { target._immuneT = game.time + 0.6; floatText(game, target, 'IMMUNE', '#c8c8d0'); }
     target.onHurt?.(game, hit, 0);
@@ -146,6 +148,11 @@ export function damage(game, target, hit) {
     floatText(game, target, 'BLOCK', '#c8c8d0');
     fx(game, 'emit', 'hit', target.x, target.y - 8, { color: '#ffffff', color2: '#c8c8d0', count: 6 });
     sfx(game, 'hit', 0.6, 0.6);
+    // teach the counterplay the first time a player's spell bounces off a shield
+    if (src?.team === 'player' && !game.state.flags.shieldHint && ((target._blockedN = (target._blockedN || 0) + 1) >= 2)) {
+      setFlag(game, 'shieldHint', true);
+      game.bus.emit(EV.TOAST, { text: 'Shields block head-on hits! Strike its side or back, punish its swing, or use Lightning / heavy spells.', color: '#e8d08a', duration: 5 });
+    }
   }
   if (crit && !hit.dot) hitStop(game, 0.06);
   if (target.hp <= 0) {

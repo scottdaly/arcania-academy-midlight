@@ -190,7 +190,7 @@ export function installBot(game) {
     }
     // prefer the strongest affordable spell against this foe's resistances, keeping a mana reserve
     const res = target?.def?.resist || {};
-    const score = (sp) => (sp.damage || 0) * (sp.count || 1) * Math.min(...(sp.elements || [sp.element]).map((el) => res[el] ?? 1));
+    const score = (sp) => (sp.damage || 0) * (1 + ((sp.count || 1) - 1) * 0.3) * /* a fan rarely lands every shard at kiting range */ (sp.elements || [sp.element]).reduce((a, el) => a + (res[el] ?? 1), 0) / (sp.elements || [sp.element]).length;
     ready.sort((a, b) => score(b.sp) - score(a.sp));
     const best = ready.find((r) => st.mana - r.sp.manaCost > 15) || ready[ready.length - 1];
     return best.i;

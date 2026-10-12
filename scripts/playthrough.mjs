@@ -197,6 +197,7 @@ async function runViewport(vpName) {
       await bot.until('fight', { maxTime: 120 });
       r = await bot.until('goto', { interactId: id, ...opts });
     }
+    if (r === 'died' || r === 'gameover') { console.log(`  [${vpName}] ${label}: died on the way`); return false; } // callers handle the death
     return check(r === 'interacted', `${label}: autopilot reached and used it (${r})`);
   }
   async function travelWait(to) {
@@ -413,14 +414,17 @@ async function runViewport(vpName) {
     check(deaths >= 1, `died at least once (${deaths})`);
     if (await scene() === 'dungeon') {
       let ok = await botUse(portal, 'return portal');
-      if (!ok) {
+      if (!ok && await G("g.scenes.currentName === 'gameover' || g.state.player.hp <= 0")) {
+        await handleDeath('depth 3 ambush'); // respawning also brings us home
+        ok = true;
+      } else if (!ok) {
         const why = await G("({ barriers: g.entities.list.filter((e) => e.constructor.name === 'Barrier').length, foes: g.entities.list.filter((e) => e.tags.has('enemy') && !e.dead).length, p: [Math.round(g.player.x / 16), Math.round(g.player.y / 16)] })");
         console.log(`  [${vpName}] return portal unreachable: ${JSON.stringify(why)}`);
         await shot('portal-unreachable');
         await bot.until('fight', { maxTime: 120 });
         ok = await botUse(portal, 'return portal (retry)');
       }
-      check(await travelWait('hub'), 'return portal leads home');
+      check(await travelWait('hub'), 'back home at the Academy');
     }
     await mark('home from dungeon');
 
@@ -445,7 +449,7 @@ async function runViewport(vpName) {
     }
     const fr = await G('({ ...g.state.fragments })');
     console.log(`  [${vpName}] fragments after the dungeons: ${JSON.stringify(fr)}`);
-    const rec2 = await forgeCraft(2);
+    const rec2 = await forgeCraft(0); // replace the starter Firebolt, as a player would (fire-immune foes abound)
     check(!!rec2, `a second recipe is affordable from dungeon loot (${rec2 ? rec2.name + ' ' + rec2.inputs.join('+') : 'none'})`);
     const crafted2 = await G('g.state.spells.crafted.length');
     check(crafted2 >= 2, `second spell crafted (crafted=${crafted2}, loadout ${await G("g.state.loadout.join(',')")})`);
@@ -477,7 +481,7 @@ async function runViewport(vpName) {
       if (sc === 'hub') {
         if (!(await G('!!g.state.flags.towerUnlocked'))) { check(false, 'tower still sealed; cannot climb'); break; }
         // more crafted spells open the higher wards; craft whenever loot allows
-        if (await G('g.state.spells.crafted.length') < 3 && await G("g.combat.listRecipes().some((r) => g.combat.canCraft(g.state, r.id).ok)")) await forgeCraft(1);
+        if (await G('g.state.spells.crafted.length') < 3 && await G("g.combat.listRecipes().some((r) => g.combat.canCraft(g.state, r.id).ok)")) await forgeCraft(0);
         const used = await botUse(towerDoor, 'Mage Tower door');
         await gsleep(0.3);
         if (await G("g.ui.isOpen('dialogue')")) await runDialogue();
@@ -487,7 +491,7 @@ async function runViewport(vpName) {
           check(false, `tower door refused: ${t} (fragments ${JSON.stringify(await G('g.state.fragments'))})`);
           // debug: make the next craft affordable so the run can continue, and record it as a balance problem
           await ev(() => { const s = window.game.state.fragments; for (const k of Object.keys(s)) s[k] += 10; });
-          await forgeCraft(1);
+          await forgeCraft(0);
         }
         continue;
       }
