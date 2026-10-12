@@ -30,9 +30,28 @@ import { ELEMENT_COLORS, TILE_SIZE } from '../core/config.js';
 import { TILE, TILE_DEFS } from '../core/tiles.js';
 import { Particles, SH, F, cid } from './particles.js';
 import { SIGS, elementsOf, comboFx } from './signatures.js';
-import { glowSprite, lightMaskSprite, lightTintSprite, decalSprite, vignetteSprite, rgba } from './sprites.js';
+import { glowSprite, decalSprite, vignetteSprite, rgba, rgbOf } from './sprites.js';
 
 const MAX_PARTICLES = 1200;
+const LIGHT_DIV = 4; // lightmap / tint buffers are 1/LIGHT_DIV of the virtual resolution
+// Radial falloff lookup tables indexed by (d / radius)^2 * LUT_N, matching the colour stops of the
+// former lightMaskSprite / lightTintSprite gradients (piecewise linear in d).
+const LUT_N = 1024;
+function makeLut(stops) {
+  const lut = new Float32Array(LUT_N);
+  for (let i = 0; i < LUT_N; i++) {
+    const d = Math.sqrt((i + 0.5) / LUT_N);
+    let s = 1;
+    while (s < stops.length - 1 && stops[s][0] < d) s++;
+    const [d0, v0] = stops[s - 1], [d1, v1] = stops[s];
+    lut[i] = v0 + (v1 - v0) * Math.min(1, Math.max(0, (d - d0) / (d1 - d0)));
+  }
+  return lut;
+}
+const MASK_LUT = makeLut([[0, 1], [0.35, 0.85], [0.7, 0.35], [1, 0]]);
+const TINT_LUT = makeLut([[0, 1], [0.4, 0.45], [1, 0]]);
+const rgbMemo = new Map();
+const rgbCached = (c) => { let v = rgbMemo.get(c); if (!v) rgbMemo.set(c, (v = rgbOf(c))); return v; };
 const TAU = Math.PI * 2;
 const R = (a, b) => a + Math.random() * (b - a);
 const A = F.ADD;
@@ -76,7 +95,8 @@ export function createFx(game) {
   let emitters = []; // tile emitters {x, y, kind}
   const flash = { color: '#fff', t: 0, dur: 0, alpha: 0 };
   let dmgVignette = 0;
-  let lightCanvas = null, lightCtx = null;
+  let lightBuf = null;
+  const lightPool = []; // reused {x, y, radius, color, intensity} records (collectLights)
   let quality = 1;
   let qualityCap = 1; // user setting ceiling (settings.particleQuality); the adaptive loop stays below it
   let frameEma = 16.7, lastFrame = 0;
@@ -370,50 +390,57 @@ export function createFx(game) {
       ctx.globalAlpha = 1;
     },
 
-    /** Darkness + light mask (SCREEN space). ambient: {darkness 0..1, color} or null. */
+    /** Darkness + light mask (SCREEN space). ambient: {darkness 0..1, color} or null.
+     *  The darkness mask and the coloured tint are soft radial falloffs, so they are rasterised in
+     *  JS into 1/LIGHT_DIV-resolution float buffers (same falloff curves as the old cached gradient
+     *  sprites), uploaded with putImageData, smoothed up 2x and blitted at 1/2 resolution: two
+     *  full-screen blits per frame instead of two scaled, filtered drawImage calls per light. */
     renderLighting(ctx, camera, ambient) {
       const darkness = ambient?.darkness ?? 0;
       const W = camera.viewW, H = camera.viewH;
-      const t = game.time;
       const L = camera.left, T = camera.top;
-      const lights = collectLights(camera, t);
-      if (darkness > 0) {
-        if (!lightCanvas || lightCanvas.width !== W || lightCanvas.height !== H) {
-          lightCanvas = document.createElement('canvas');
-          lightCanvas.width = W;
-          lightCanvas.height = H;
-          lightCtx = lightCanvas.getContext('2d');
+      const nl = collectLights(camera, game.time);
+      const lb = lightBuffers(W, H);
+      const { lw, lh, dark, tr, tg, tb } = lb;
+      const k = 1 / LIGHT_DIV;
+      const N = lw * lh;
+      const doDark = darkness > 0;
+      if (doDark) dark.fill(1);
+      tr.fill(0); tg.fill(0); tb.fill(0);
+      const tintK = doDark ? 0.2 + darkness * 0.12 : 0.12;
+      let anyTint = false;
+      for (let li = 0; li < nl; li++) {
+        const l = lightPool[li];
+        const sx = l.x - L, sy = l.y - T, r = l.radius;
+        if (!(r > 0) || sx < -r || sy < -r || sx > W + r || sy > H + r) continue;
+        const xl = sx * k - 0.5, yl = sy * k - 0.5; // light centre in buffer pixel-centre coordinates
+        if (doDark) {
+          const a = Math.min(1, l.intensity);
+          if (a > 0) stamp(lb, xl, yl, r * 1.25 * k, MASK_LUT, a, dark, null, null, 0, 0, 0);
         }
-        const lc = lightCtx;
-        lc.globalCompositeOperation = 'source-over';
-        lc.globalAlpha = 1;
-        lc.clearRect(0, 0, W, H);
-        lc.globalAlpha = darkness;
-        lc.fillStyle = ambient.color || '#05030a';
-        lc.fillRect(0, 0, W, H);
-        lc.globalCompositeOperation = 'destination-out';
-        const mask = lightMaskSprite();
-        for (const l of lights) {
-          const x = l.x - L, y = l.y - T, r = l.radius;
-          if (x < -r || y < -r || x > W + r || y > H + r) continue;
-          lc.globalAlpha = Math.min(1, l.intensity);
-          const rr = r * 1.25;
-          lc.drawImage(mask, x - rr, y - rr, rr * 2, rr * 2);
+        const g = Math.min(1, tintK * l.intensity);
+        if (g > 0) {
+          const c = rgbCached(l.color || '#ffffff');
+          stamp(lb, xl, yl, r * k, TINT_LUT, g, null, tr, tg, tb, c);
+          anyTint = true;
         }
-        lc.globalAlpha = 1;
-        lc.globalCompositeOperation = 'source-over';
-        ctx.drawImage(lightCanvas, 0, 0);
       }
-      // coloured additive tint from lights
-      ctx.globalCompositeOperation = 'lighter';
-      const tintK = darkness > 0 ? 0.2 + darkness * 0.12 : 0.12;
-      for (const l of lights) {
-        const x = l.x - L, y = l.y - T, r = l.radius;
-        if (x < -r || y < -r || x > W + r || y > H + r) continue;
-        if (quality < 0.5 && r < 20) continue;
-        ctx.globalAlpha = Math.min(1, tintK * l.intensity);
-        ctx.drawImage(lightTintSprite(l.color || '#ffffff'), x - r, y - r, r * 2, r * 2);
+      const DW = lw * LIGHT_DIV, DH = lh * LIGHT_DIV;
+      const smooth = ctx.imageSmoothingEnabled;
+      ctx.imageSmoothingEnabled = false;
+      if (doDark) {
+        const [R, G, B] = rgbCached(ambient.color || '#05030a');
+        const d = lb.darkImg.data, A = darkness * 255;
+        for (let i = 0, j = 0; i < N; i++, j += 4) { d[j] = R; d[j + 1] = G; d[j + 2] = B; d[j + 3] = A * dark[i]; }
+        ctx.drawImage(upscale(lb, lb.darkImg), 0, 0, DW, DH);
       }
+      if (anyTint) {
+        const d = lb.tintImg.data;
+        for (let i = 0, j = 0; i < N; i++, j += 4) { d[j] = tr[i]; d[j + 1] = tg[i]; d[j + 2] = tb[i]; d[j + 3] = 255; }
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.drawImage(upscale(lb, lb.tintImg), 0, 0, DW, DH);
+      }
+      ctx.imageSmoothingEnabled = smooth;
       ctx.globalAlpha = 1;
       ctx.globalCompositeOperation = 'source-over';
     },
@@ -568,20 +595,78 @@ export function createFx(game) {
     }
   }
 
+  // ------------------------------------------------------------- lighting buffers (renderLighting)
+  /** Quarter-res float accumulators + ImageData + a half-res smoothing canvas, (re)made on resize. */
+  function lightBuffers(W, H) {
+    const lw = Math.ceil(W / LIGHT_DIV) + 1, lh = Math.ceil(H / LIGHT_DIV) + 1;
+    if (lightBuf && lightBuf.lw === lw && lightBuf.lh === lh) return lightBuf;
+    const mk = (w, h) => { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; };
+    const small = mk(lw, lh), mid = mk(lw * 2, lh * 2);
+    const sctx = small.getContext('2d'), mctx = mid.getContext('2d');
+    mctx.imageSmoothingEnabled = true;
+    mctx.globalCompositeOperation = 'copy';
+    const N = lw * lh;
+    lightBuf = {
+      lw, lh, small, sctx, mid, mctx,
+      dark: new Float32Array(N), tr: new Float32Array(N), tg: new Float32Array(N), tb: new Float32Array(N),
+      darkImg: sctx.createImageData(lw, lh), tintImg: sctx.createImageData(lw, lh),
+      mids: [mid, mk(lw * 2, lh * 2)], flip: 0,
+    };
+    lightBuf.mids[1].getContext('2d').imageSmoothingEnabled = true;
+    return lightBuf;
+  }
+  /** Upload a quarter-res ImageData and smooth it up 2x (bilinear); returns the half-res canvas. */
+  function upscale(lb, img) {
+    lb.sctx.putImageData(img, 0, 0);
+    const mid = lb.mids[lb.flip ^= 1];
+    const mc = mid.getContext('2d');
+    mc.globalCompositeOperation = 'copy';
+    mc.drawImage(lb.small, 0, 0, mid.width, mid.height);
+    return mid;
+  }
+  /** Add one radial light to the buffers. rad in buffer px; lut indexed by (d/rad)^2.
+   *  Darkness: dark *= 1 - lut*a (destination-out). Tint: t += colour * lut * a (additive). */
+  function stamp(lb, xl, yl, rad, lut, a, dark, tr, tg, tb, c) {
+    const { lw, lh } = lb;
+    const i0 = Math.max(0, Math.ceil(xl - rad)), i1 = Math.min(lw - 1, Math.floor(xl + rad));
+    const j0 = Math.max(0, Math.ceil(yl - rad)), j1 = Math.min(lh - 1, Math.floor(yl + rad));
+    if (i0 > i1 || j0 > j1) return;
+    const inv = LUT_N / (rad * rad);
+    const cr = c ? c[0] * a : 0, cg = c ? c[1] * a : 0, cb = c ? c[2] * a : 0;
+    for (let j = j0; j <= j1; j++) {
+      const dy = j - yl, dy2 = dy * dy * inv;
+      let idx = j * lw + i0;
+      for (let i = i0; i <= i1; i++, idx++) {
+        const dx = i - xl;
+        const q = (dx * dx * inv + dy2) | 0;
+        if (q >= LUT_N) continue;
+        const v = lut[q];
+        if (dark) dark[idx] *= 1 - v * a;
+        else { tr[idx] += cr * v; tg[idx] += cg * v; tb[idx] += cb * v; }
+      }
+    }
+  }
+
+  /** Fills lightPool with this frame's lights; returns the count (no per-frame allocations). */
   function collectLights(camera, t) {
-    const out = [];
-    for (const l of frameLights) out.push(l);
-    for (const h of attached) out.push({ x: h.target.x, y: h.target.y - 4, radius: h.radius, color: h.color, intensity: h.intensity });
+    let n = 0;
+    const put = (x, y, radius, color, intensity) => {
+      const l = lightPool[n] || (lightPool[n] = { x: 0, y: 0, radius: 0, color: '', intensity: 0 });
+      l.x = x; l.y = y; l.radius = radius; l.color = color; l.intensity = intensity;
+      n++;
+    };
+    for (const l of frameLights) put(l.x, l.y, l.radius, l.color, l.intensity);
+    for (const h of attached) put(h.target.x, h.target.y - 4, h.radius, h.color, h.intensity);
     for (const p of pulses) {
       const k = 1 - p.t / p.dur;
-      out.push({ x: p.x, y: p.y, radius: p.r * (0.7 + 0.3 * k), color: p.color, intensity: p.i * k });
+      put(p.x, p.y, p.r * (0.7 + 0.3 * k), p.color, p.i * k);
     }
     for (const s of staticLights) {
       if (!camera.isVisible(s.x, s.y, s.radius)) continue;
       const fl = s.flicker ? 0.88 + 0.07 * Math.sin(t * 11 + s.ph) + 0.05 * Math.sin(t * 23 + s.ph * 3) : 0.95 + 0.05 * Math.sin(t * 1.5 + s.ph);
-      out.push({ x: s.x, y: s.y, radius: s.radius * fl, color: s.color, intensity: s.intensity * (s.flicker ? 0.9 + 0.1 * Math.sin(t * 17 + s.ph) : 1) });
+      put(s.x, s.y, s.radius * fl, s.color, s.intensity * (s.flicker ? 0.9 + 0.1 * Math.sin(t * 17 + s.ph) : 1));
     }
-    return out;
+    return n;
   }
 
   function measure() {

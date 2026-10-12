@@ -1073,7 +1073,7 @@ export function craftingPanel(game, ui, data = {}) {
   function drawResult(ctx, t) {
     const W = game.display.width, H = game.display.height;
     const k = easeOutBack(clamp(phaseT / 0.35, 0, 1));
-    dim(ctx, W, H, 0.5 * clamp(phaseT / 0.2, 0, 1));
+    dim(ctx, W, H, 0.78 * clamp(phaseT / 0.2, 0, 1)); // hide the details panel behind the reveal
     const R = K.safeRect(game, 4);
     const cw = Math.min(236, R.w - 8), ch = Math.min(134, R.h - 8);
     const x = Math.round(R.x + (R.w - cw) / 2);

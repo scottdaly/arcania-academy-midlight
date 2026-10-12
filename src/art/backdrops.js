@@ -61,7 +61,20 @@ function staticLayer(name, w, h) {
     // craters
     c.fillStyle = mix(S.moon, '#000000', 0.15);
     for (let i = 0; i < 5; i++) { const a = hash2(i, 1, 9) * 6.28, d = hash2(i, 2, 9) * mr * 0.7; const r = 1 + Math.floor(hash2(i, 3, 9) * mr * 0.25); c.fillRect(Math.round(mx + Math.cos(a) * d), Math.round(my + Math.sin(a) * d), r, r); }
-    if (name === 'gameover') { c.fillStyle = '#1a0408'; c.fillRect(mx - 1, my - mr, 1, mr * 2); }
+    if (name === 'gameover') {
+      // a jagged, branching crack (not a straight seam)
+      c.fillStyle = '#1a0408';
+      let x = mx + Math.round(mr * 0.15);
+      for (let y = my - mr + 2; y <= my + mr - 3; y++) {
+        x += Math.round((hash2(y, 4, 9) - 0.5) * 2.6);
+        x = Math.max(mx - mr + 3, Math.min(mx + mr - 3, x));
+        c.fillRect(x, y, 1, 1);
+        if (y === my - 2 || y === my + Math.round(mr * 0.4)) {
+          const dir = y < my ? -1 : 1;
+          for (let k = 1; k < Math.round(mr * 0.45); k++) c.fillRect(x + dir * k, y + Math.round(k * 0.6), 1, 1);
+        }
+      }
+    }
   }
   // mountain layers
   ridge(c, w, h, h * 0.62, h * 0.12, 0.012, 1, S.far);

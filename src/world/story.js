@@ -52,7 +52,7 @@ export function getObjective(s) {
         : 'Visit Forge-Master Brindle in the east wing.';
     case 'delve':
       if (flag(s, 'reachedDepth3')) return 'Return to the Headmaster: the tower seal can be lifted.';
-      return 'Descend through the portal (south-east) and reach depth 3, the Frozen Crypts.';
+      return 'Take the portal (south-east) down to depth 3, the Frozen Crypts.';
     case 'tower': {
       const all = flag(s, `towerFloor${TOWER_FLOORS}Cleared`);
       return all ? 'Ascend to the summit and face the Corrupted Archmage.' : `Climb the Mage Tower: floor ${nextTowerFloor(s)} of ${TOWER_FLOORS}.`;

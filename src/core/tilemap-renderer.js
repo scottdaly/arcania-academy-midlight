@@ -12,6 +12,7 @@ export class TileMapRenderer {
     this.art = art;
     this.map = null;
     this.chunks = new Map(); // key "layer:cx,cy" -> {canvas, animated: [{tx,ty,id}]}
+    this._groundPass = 0; // increments per 'ground' renderLayer call (see _mergeDeco)
   }
 
   setMap(map) {
@@ -67,11 +68,25 @@ export class TileMapRenderer {
     return chunk;
   }
 
-  /** Draw one layer. ctx must already be in world space (camera.apply). */
+  /** Bake the static deco chunk into a ground chunk that has no animated ground tiles (deco must
+   *  stay above animated ground, so such chunks keep two separate layers). */
+  _mergeDeco(g, cx, cy) {
+    g.withDeco = false;
+    if (g.animated.length) return;
+    const d = this.chunks.get(`deco:${cx},${cy}`) || this._bake('deco', cx, cy);
+    g.canvas.getContext('2d').drawImage(d.canvas, 0, 0);
+    g.withDeco = true;
+  }
+
+  /** Draw one layer. ctx must already be in world space (camera.apply).
+   *  Ground chunks carry the static deco layer baked in where possible, so the 'deco' pass that
+   *  follows only draws animated deco tiles there: one chunk blit instead of two. */
   renderLayer(ctx, camera, layer, time) {
     const map = this.map;
     if (!map) return;
     this._syncDirty();
+    const ground = layer === 'ground';
+    if (ground) this._groundPass++;
     const cx0 = Math.max(0, Math.floor(camera.left / CHUNK_PX));
     const cy0 = Math.max(0, Math.floor(camera.top / CHUNK_PX));
     const cx1 = Math.min(Math.ceil(map.w / CHUNK) - 1, Math.floor((camera.left + camera.viewW) / CHUNK_PX));
@@ -79,7 +94,15 @@ export class TileMapRenderer {
     for (let cy = cy0; cy <= cy1; cy++) {
       for (let cx = cx0; cx <= cx1; cx++) {
         const chunk = this.chunks.get(`${layer}:${cx},${cy}`) || this._bake(layer, cx, cy);
-        ctx.drawImage(chunk.canvas, cx * CHUNK_PX, cy * CHUNK_PX);
+        if (ground) {
+          if (chunk.withDeco === undefined) this._mergeDeco(chunk, cx, cy);
+          if (chunk.withDeco) chunk.drawnPass = this._groundPass;
+          ctx.drawImage(chunk.canvas, cx * CHUNK_PX, cy * CHUNK_PX);
+        } else {
+          // skip the static deco blit if this frame's ground blit already contained it
+          const g = this.chunks.get(`ground:${cx},${cy}`);
+          if (!(g && g.withDeco && g.drawnPass === this._groundPass)) ctx.drawImage(chunk.canvas, cx * CHUNK_PX, cy * CHUNK_PX);
+        }
         for (const a of chunk.animated) {
           const px = a.tx * TILE_SIZE, py = a.ty * TILE_SIZE;
           if (!camera.isVisible(px + 8, py + 8, 16)) continue;

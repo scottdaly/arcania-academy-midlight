@@ -48,6 +48,13 @@ export function flushGlow(ctx, strength = 1) {
   for (const q of glowQueue) {
     ctx.setTransform(q.m);
     ctx.globalAlpha = q.alpha * strength;
+    const s = q.s;
+    if (s.glowBloom !== false && q.dw === s.fw && q.dh === s.fh) {
+      // unscaled: glow + its 3 offset bloom copies are pre-summed into one padded strip
+      const b = s.bloomCanvas || (s.bloomCanvas = bakeBloom(s));
+      ctx.drawImage(b, q.frame * (s.fw + 2), 0, s.fw + 2, s.fh + 1, q.dx - 1, q.dy - 1, s.fw + 2, s.fh + 1);
+      continue;
+    }
     ctx.drawImage(q.s.glowCanvas, q.frame * q.s.fw, 0, q.s.fw, q.s.fh, q.dx, q.dy, q.dw, q.dh);
     // soft bloom: the same glow, slightly offset
     if (q.s.glowBloom !== false) {
@@ -61,6 +68,23 @@ export function flushGlow(ctx, strength = 1) {
   glowQueue.length = 0;
 }
 export function clearGlow() { glowQueue.length = 0; }
+
+/** Additive sum of a glow strip and its 1px left/right/up bloom copies at 35% (what flushGlow used
+ *  to draw as 4 blits), one frame per (fw + 2) x (fh + 1) cell with the glow at (1, 1). */
+function bakeBloom(s) {
+  const n = Math.round(s.glowCanvas.width / s.fw);
+  const { canvas, ctx } = makeCanvas((s.fw + 2) * n, s.fh + 1);
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < n; i++) {
+    const ox = i * (s.fw + 2) + 1;
+    const blit = (dx, dy) => ctx.drawImage(s.glowCanvas, i * s.fw, 0, s.fw, s.fh, ox + dx, 1 + dy, s.fw, s.fh);
+    ctx.globalAlpha = 1;
+    blit(0, 0);
+    ctx.globalAlpha = 0.35;
+    blit(-1, 0); blit(1, 0); blit(0, -1);
+  }
+  return canvas;
+}
 
 // ------------------------------------------------------------------ build
 

@@ -244,11 +244,11 @@ export function createTouchControls(game, ui) {
     const base = ctx.globalAlpha;
     if (stick.id == null && stick.alpha <= 0) {
       // idle ghost at the default spot so players know where to touch
-      ctx.globalAlpha = base * 0.4;
+      ctx.globalAlpha = base * 0.6;
       drawDisc(ctx, stick.homeX, stick.homeY, STICK_R + 1, null, COL.ink);
       drawDisc(ctx, stick.homeX, stick.homeY, STICK_R, 'rgba(20,12,36,0.45)', '#c8b8ff');
       drawDisc(ctx, stick.homeX, stick.homeY, KNOB_R, 'rgba(200,184,255,0.55)');
-      ctx.globalAlpha = base * 0.45;
+      ctx.globalAlpha = base * 0.7;
       chevrons(ctx, stick.homeX, stick.homeY, '#e8e0ff');
       ctx.globalAlpha = base;
       return;
@@ -352,9 +352,9 @@ export function createTouchControls(game, ui) {
     const x = b.x, y = b.y + (down ? 1 : 0), r = b.r;
     const base = ctx.globalAlpha;
     const pulse = on ? 0.5 + 0.5 * Math.sin(t * 6) : 0;
-    ctx.globalAlpha = base * (on ? 1 : 0.62);
+    ctx.globalAlpha = base * (on ? 1 : 0.8);
     drawDisc(ctx, x, y, r + 1, null, COL.ink);
-    drawDisc(ctx, x, y, r, down ? 'rgba(90,64,30,0.9)' : on ? 'rgba(48,32,20,0.82)' : 'rgba(22,14,40,0.6)', on ? mix(COL.gold, COL.goldHi, pulse) : '#8a80a8', 2);
+    drawDisc(ctx, x, y, r, down ? 'rgba(90,64,30,0.9)' : on ? 'rgba(48,32,20,0.82)' : 'rgba(22,14,40,0.72)', on ? mix(COL.gold, COL.goldHi, pulse) : '#a89ec8', 2);
     if (on && !down) {
       ctx.globalAlpha = base * (0.25 + 0.45 * (1 - pulse));
       drawRing(ctx, x, y, r + 2 + Math.round(pulse * 3), COL.gold, 1);
@@ -385,7 +385,7 @@ export function createTouchControls(game, ui) {
     const base = ctx.globalAlpha;
     ctx.globalAlpha = base * 0.92;
     drawDisc(ctx, x, y, r + 1, null, COL.ink);
-    drawDisc(ctx, x, y, r, down ? 'rgba(70,52,120,0.9)' : 'rgba(22,14,40,0.62)', down ? COL.edgeHi : 'rgba(200,184,255,0.7)', 1);
+    drawDisc(ctx, x, y, r, down ? 'rgba(70,52,120,0.9)' : 'rgba(22,14,40,0.75)', down ? COL.edgeHi : 'rgba(200,184,255,0.85)', 1);
     ctx.globalAlpha = base;
     if (b.kind === 'dash') {
       const sz = maskSize('dash');

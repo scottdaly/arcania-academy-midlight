@@ -78,17 +78,32 @@ try {
     window.__bot.run('fight', { maxTime: 999, untilClear: false });
     return n;
   });
-  await scenario('boss-phase3', '?scene=boss&mute=1', () => {
+  await scenario('boss-phase3', '?scene=boss&mute=1', async () => {
     const g = window.game;
     const b = g.entities.withTag('boss')[0];
     for (const id of ['steam_bolt', 'fire_orb']) if (!g.state.spells.known.includes(id)) g.state.spells.known.push(id);
     g.state.loadout = ['firebolt', 'steam_bolt', 'fire_orb', 'frost_shard'];
     g.state.player.maxHp = g.state.player.hp = 5000;
     g.state.player.manaRegen = 60;
-    // knock the Archmage through both phase thresholds (one at a time so each transition runs)
-    g.combat.damage(g, b, { amount: b.maxHp * 0.4, element: 'arcane', source: g.player });
-    setTimeout(() => { b.ward = null; b.state = 'idle'; g.combat.damage(g, b, { amount: b.maxHp * 0.4, element: 'arcane', source: g.player }); }, 2500);
-    b.maxHp *= 4; b.hp *= 4; // and keep it alive for the sample
+    // Knock the Archmage through both phase thresholds, one at a time so each transition runs.
+    // Damage is ignored while it is invulnerable (intro / 2.4 s phase transition) and wards / arcane
+    // resistance scale big hits, so wait until it is attackable, drop its HP just under the
+    // threshold and let a 1-damage hit trigger the boss's own onHurt -> startTransition.
+    const waitAttackable = () => new Promise((resolve, reject) => {
+      const t0 = performance.now();
+      const iv = setInterval(() => {
+        if (!b.invulnerable && b.state !== 'intro' && b.state !== 'transition') { clearInterval(iv); resolve(); }
+        else if (performance.now() - t0 > 15000) { clearInterval(iv); reject(new Error(`boss stuck in ${b.state}`)); }
+      }, 50);
+    });
+    for (const [phase, ratio] of [[2, 0.6], [3, 0.3]]) {
+      await waitAttackable();
+      b.ward = null;
+      b.hp = Math.floor(b.maxHp * ratio);
+      g.combat.damage(g, b, { amount: 1, element: 'arcane', source: g.player });
+      if (b.phase !== phase) throw new Error(`boss did not enter phase ${phase} (phase ${b.phase}, state ${b.state})`);
+    }
+    b.maxHp *= 4; b.hp *= 4; // keep it alive for the sample (same HP ratio, so it stays in phase 3)
     window.__bot.run('fight', { maxTime: 999, untilClear: false });
   });
 } catch (err) {

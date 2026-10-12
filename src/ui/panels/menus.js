@@ -583,12 +583,14 @@ export function gameoverPanel(game, ui, data = {}) {
 
 const CREDITS = [
   ['h', 'ARCANIA ACADEMY'], ['', ''],
-  ['g', 'Design & Code'], ['', 'The Arcania team'], ['', ''],
-  ['g', 'Core & Engine'], ['', 'Core team'], ['', ''],
-  ['g', 'Art & FX'], ['', 'Art & FX team'], ['', ''],
-  ['g', 'Combat & Spells'], ['', 'Combat team'], ['', ''],
-  ['g', 'World & Story'], ['', 'World team'], ['', ''],
-  ['g', 'UI & Audio'], ['', 'UI & Audio team'], ['', ''],
+  ['g', 'Headmaster'], ['', 'Elowen'], ['', ''],
+  ['g', 'Arcane Forge'], ['', 'Forge-Master Brindle'], ['', ''],
+  ['g', 'Library'], ['', 'Archivist Quill'], ['', ''],
+  ['g', 'Stores'], ['', 'Quartermaster Tobbin'], ['', ''],
+  ['g', 'Infirmary'], ['', 'Nurse Marigold'], ['', ''],
+  ['g', 'Classmates'], ['', 'Cassius Vane, Wren, Pip'], ['', ''],
+  ['g', 'Academy Cat'], ['', 'Mote'], ['', ''],
+  ['g', 'and'], ['', 'Archmage Corvin,'], ['d', 'free at last'], ['', ''],
   ['d', 'Every pixel and note'], ['d', 'was made in code.'], ['', ''],
   ['h', 'Thank you for playing!'], ['', ''], ['', ''],
 ];

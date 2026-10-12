@@ -102,7 +102,7 @@ export function createHud(game, ui) {
 
   function banner(title, subtitle = '', color = COL.gold, opts = {}) {
     if (!title) return;
-    banners.push({ title: String(title), sub: subtitle ? String(subtitle) : '', color, t: -(opts.delay ?? 0), dur: opts.duration ?? 2.9, played: false });
+    banners.push({ title: String(title), sub: subtitle ? String(subtitle) : '', color, t: -(opts.delay ?? 0), dur: opts.duration ?? 2.5, played: false });
     while (banners.length > 3) banners.shift();
   }
 
@@ -531,7 +531,7 @@ export function createHud(game, ui) {
     let scale = 2;
     let tw = measureText(b.title, 2);
     if (tw > Math.min(W - 40, W * 0.78)) { scale = 1; tw = measureText(b.title); }
-    const cy = Math.round(H * (H > W ? 0.3 : 0.37));
+    const cy = Math.round(H * (H > W ? 0.24 : 0.27)); // above the action: the player sits at mid-screen
     const cx = Math.round(W / 2);
     ctx.save();
     ctx.globalAlpha *= a;
@@ -588,7 +588,12 @@ export function createHud(game, ui) {
       if (txt !== quest.text) { if (quest.text) quest.flash = 1; quest.text = txt; quest.w = -1; }
     }
     if (!quest.text || game.level?.kind === 'boss') return 0;
-    if (quest.w !== maxW) { quest.w = maxW; quest.lines = wrapText(quest.text, maxW - 14).slice(0, 3); }
+    if (quest.w !== maxW) {
+      quest.w = maxW;
+      const all = wrapText(quest.text, maxW - 14);
+      quest.lines = all.slice(0, 3);
+      if (all.length > 3) quest.lines[2] = quest.lines[2].replace(/[\s.,:;]*$/, '') + '...';
+    }
     const lw = Math.max(...quest.lines.map((l) => measureText(l)));
     const h = quest.lines.length * 8 + 5;
     quest.pw = lw + 18;
@@ -633,7 +638,7 @@ export function createHud(game, ui) {
     setRect(layout.fragments, fx, fy, fw, FRAG_H);
     let leftBottom = fragRight ? vy + vb.h : fy + FRAG_H;
     // current objective (under the vitals / fragments)
-    const qh = drawObjective(ctx, vx, leftBottom + 4, clamp(Math.round(W * (touchOn ? 0.36 : 0.3)), 110, 190));
+    const qh = drawObjective(ctx, vx, leftBottom + 4, clamp(Math.round(W * 0.36), 120, 200));
     if (qh) { setRect(layout.quest, vx, leftBottom + 4, quest.pw, qh); leftBottom += qh + 4; } else setRect(layout.quest, 0, 0, 0, 0);
 
     // minimap (top-right, under the fragments or the touch buttons)

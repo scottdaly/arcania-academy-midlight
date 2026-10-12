@@ -13,16 +13,17 @@ import { difficulty, angleDiff, turnToward, colorsOf, fx, sfx, shake, fillDisc, 
 // Small BFS (8-way, no corner cutting) from the player's tile outward; returns the centre of the
 // next tile an enemy at (fx, fy) should step to, or null. Bounded so it stays cheap.
 const PATH_MAX = 1400;
-let pathPrev = null, pathQ = null;
+let pathPrev = null, pathQ = null, pathGen = 0; // pathPrev: per-tile "seen" stamp (== pathGen), no per-call Map
 function pathStep(map, fx, fy, tx, ty) {
   const W = map.w, H = map.h, N = W * H;
   if (!pathPrev || pathPrev.length < N) { pathPrev = new Int32Array(N); pathQ = new Int32Array(N); }
   const sx = Math.floor(fx / 16), sy = Math.floor(fy / 16), gx = Math.floor(tx / 16), gy = Math.floor(ty / 16);
   if (sx === gx && sy === gy) return null;
   const goal = gy * W + gx, start = sy * W + sx;
-  const seen = new Map();
+  if (++pathGen > 0x3fffffff) { pathPrev.fill(0); pathGen = 1; }
+  const gen = pathGen, seen = pathPrev;
   let qh = 0, qt = 0;
-  pathQ[qt++] = goal; seen.set(goal, -1);
+  pathQ[qt++] = goal; seen[goal] = gen;
   while (qh < qt && qt < PATH_MAX) {
     const c = pathQ[qh++], cx = c % W, cy = (c / W) | 0;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -30,10 +31,10 @@ function pathStep(map, fx, fy, tx, ty) {
       const nx = cx + dx, ny = cy + dy;
       if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
       const n = ny * W + nx;
-      if (seen.has(n)) continue;
+      if (seen[n] === gen) continue;
       if (n !== start && map.isSolid(nx, ny, 'walk')) continue;
       if (dx && dy && (map.isSolid(cx + dx, cy, 'walk') || map.isSolid(cx, cy + dy, 'walk'))) continue;
-      seen.set(n, c);
+      seen[n] = gen;
       if (n === start) return { x: cx * 16 + 8, y: cy * 16 + 8 }; // the tile we came from leads to the player
       pathQ[qt++] = n;
     }

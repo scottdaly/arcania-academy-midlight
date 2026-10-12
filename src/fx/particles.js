@@ -1,6 +1,7 @@
 // Pooled particle system (team: art+fx). Structure-of-arrays typed buffers, zero allocations per
 // particle, swap-remove on death, hard cap. Colours are interned to small ints.
 import { glowSprite, smokeSprite, runeSprite, RUNE_COUNT } from './sprites.js';
+import { AdditiveLayer } from './additive.js';
 
 export const SH = { PX: 0, GLOW: 1, SPARK: 2, SHARD: 3, SMOKE: 4, RUNE: 5, STAR: 6, CHUNK: 7, MOTE: 8 };
 export const F = { ADD: 1, FLICKER: 2, FADEIN: 4, GROW: 8, SHRINK: 16, BOUNCE: 32, WOBBLE: 64, TWINKLE: 128 };
@@ -79,11 +80,19 @@ export class Particles {
     this.c1[to] = this.c1[from]; this.c2[to] = this.c2[from]; this.shape[to] = this.shape[from]; this.flags[to] = this.flags[from];
   }
 
-  /** Draw all particles (world space). Two passes: normal blend, then additive. */
-  render(ctx, left, top, right, bottom, time) {
+  /** Draw all particles (world space). Two passes: normal blend, then additive. The additive pass
+   *  is summed in software (AdditiveLayer) and composited with one blit when ctx is a plain
+   *  integer translation (the normal case); otherwise it draws straight to ctx with 'lighter'. */
+  render(dst, left, top, right, bottom, time) {
     if (!this.n) return;
+    const m = dst.getTransform();
+    const soft = m.a === 1 && m.b === 0 && m.c === 0 && m.d === 1 && Number.isInteger(m.e) && Number.isInteger(m.f);
+    let ctx = dst;
     for (let pass = 0; pass < 2; pass++) {
-      ctx.globalCompositeOperation = pass ? 'lighter' : 'source-over';
+      if (pass && soft) {
+        ctx = this.add ||= new AdditiveLayer();
+        ctx.begin(dst.canvas.width, dst.canvas.height, m.e, m.f);
+      } else dst.globalCompositeOperation = pass ? 'lighter' : 'source-over';
       for (let i = 0; i < this.n; i++) {
         const fl = this.flags[i];
         if (((fl & 1) ? 1 : 0) !== pass) continue;
@@ -179,7 +188,8 @@ export class Particles {
         }
       }
     }
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
+    if (ctx !== dst) ctx.flush(dst);
+    dst.globalAlpha = 1;
+    dst.globalCompositeOperation = 'source-over';
   }
 }

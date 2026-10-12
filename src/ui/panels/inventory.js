@@ -486,7 +486,6 @@ export function inventoryPanel(game, ui, data = {}) {
       game.art?.drawIcon?.(ctx, sp?.icon || 'spell_' + drag.spellId, Math.round(drag.x) - 8, Math.round(drag.y) - 8, { size: 16 });
       ctx.globalAlpha = 1;
     }
-    drawTooltip(ctx, t);
   }
 
   // ---- items tab
@@ -867,44 +866,6 @@ export function inventoryPanel(game, ui, data = {}) {
   }
 
   // ---- mouse tooltip
-  function drawTooltip(ctx, t) {
-    const inp = game.input;
-    if (inp.lastDevice !== 'mouse' || !inp.mouse.inside || drag?.active) return;
-    const hid = hits.hoverId;
-    if (!hid || !(hid.startsWith('inv-item-') || hid.startsWith('inv-equip-') || hid.startsWith('inv-spell-') || hid.startsWith('inv-slot-'))) return;
-    const e = focusedEntry();
-    if (!e || !e.id) return;
-    const lines = [];
-    if (e.kind === 'item') {
-      const it = e.item;
-      const rar = rarityOf(it?.rarity);
-      lines.push([it?.name || e.id, rar.hi]);
-      lines.push([`${(rar.label || '').toUpperCase()}${it?.slot ? ' · ' + String(it.slot).toUpperCase() : ''}`, rar.color]);
-      for (const l of itemLines(it).slice(0, 5)) lines.push(l);
-      const lab = actionLabel(e);
-      if (lab) lines.push([`CLICK: ${lab}`, COL.dim]);
-    } else {
-      const sp = e.spell;
-      lines.push([sp?.name || e.id, mix(elColor(sp?.element, 0), '#ffffff', 0.35)]);
-      lines.push([`MANA ${K.fmt(sp?.manaCost)}  CD ${K.fmt(sp?.cooldown, 2)}S`, COL.dim]);
-      lines.push(['CLICK, THEN A SLOT', COL.dimmer]);
-    }
-    let w = 0;
-    for (const [s] of lines) w = Math.max(w, measureText(s));
-    w = Math.min(w + 8, 150);
-    const h = lines.length * 8 + 5;
-    const R = K.safeRect(game, 1);
-    let x = Math.round(inp.mouse.x + 10), y = Math.round(inp.mouse.y + 10);
-    if (x + w > R.x + R.w) x = Math.round(inp.mouse.x - 6 - w);
-    if (y + h > R.y + R.h) y = Math.round(R.y + R.h - h);
-    x = Math.max(R.x, x); y = Math.max(R.y, y);
-    rrect(ctx, x - 1, y - 1, w + 2, h + 2, COL.ink);
-    rrect(ctx, x, y, w, h, COL.edge);
-    ctx.fillStyle = 'rgba(16,10,30,0.96)';
-    ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
-    lines.forEach(([s, c], i) => drawText(ctx, K.ellipsize(s, w - 8), x + 4, y + 3 + i * 8, { color: c }));
-  }
-
   // initial focus
   if (tab === 'items') foc = items().length ? { zone: 'grid', i: 0 } : { zone: 'equip', i: 0 };
   else foc = spells().length ? { zone: 'list', i: 0 } : { zone: 'slots', i: 0 };

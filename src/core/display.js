@@ -1,8 +1,10 @@
 // Low-res pixel-art render target, integer-scaled to fill the screen.
 //
 // Everything is drawn into `display.ctx` (the virtual buffer, width x height virtual pixels,
-// imageSmoothingEnabled = false). At the end of each frame `present()` blits the buffer to the
-// real canvas with an integer scale factor. The virtual size adapts to the screen's aspect ratio:
+// imageSmoothingEnabled = false). The buffer IS the on-screen canvas: its backing store has the
+// virtual size and CSS (image-rendering: pixelated) scales it by an integer number of device
+// pixels, so the upscale is done by the browser compositor instead of a per-frame full-screen
+// drawImage into a device-resolution backbuffer (2532x1170 at DPR 3). The virtual size adapts to the screen's aspect ratio:
 // the short side is ~TARGET_SHORT_SIDE px (e.g. 480x270 on 1080p, ~633x292 on a landscape phone,
 // ~292x633 portrait). The buffer may overhang the screen by < `scale` device pixels on the
 // right/bottom edge; keep important UI a few px away from the edges (use `display.safe`).
@@ -12,10 +14,12 @@ export class Display {
   /** @param {HTMLCanvasElement} canvas */
   constructor(canvas) {
     this.canvas = canvas;
-    this.screenCtx = canvas.getContext('2d', { alpha: false });
-    this.buffer = document.createElement('canvas');
+    /** The on-screen canvas doubles as the virtual buffer (see header). */
+    this.buffer = canvas;
     /** The virtual low-res context everyone draws into. */
-    this.ctx = this.buffer.getContext('2d');
+    this.ctx = canvas.getContext('2d', { alpha: false });
+    this.screenCtx = this.ctx;
+    canvas.style.imageRendering = 'pixelated';
     /** Virtual size in pixels. */
     this.width = 480;
     this.height = 270;
@@ -56,18 +60,16 @@ export class Display {
 
     this.dpr = dpr;
     this.scale = scale;
-    this.canvas.style.width = cssW + 'px';
-    this.canvas.style.height = cssH + 'px';
-    this.canvas.width = devW;
-    this.canvas.height = devH;
     this.width = Math.ceil(devW / scale);
     this.height = Math.ceil(devH / scale);
-    this.buffer.width = this.width;
-    this.buffer.height = this.height;
+    // backing store = virtual size; CSS size = virtual * scale device px (may overhang by < scale px)
+    this.canvas.width = this.width;
+    this.canvas.height = this.height;
+    this.canvas.style.width = (this.width * scale) / dpr + 'px';
+    this.canvas.style.height = (this.height * scale) / dpr + 'px';
     this.orientation = this.width >= this.height ? 'landscape' : 'portrait';
     // Context state resets when a canvas is resized.
     this.ctx.imageSmoothingEnabled = false;
-    this.screenCtx.imageSmoothingEnabled = false;
 
     if (this._probe) {
       const cs = getComputedStyle(this._probe);
@@ -88,12 +90,8 @@ export class Display {
     }
   }
 
-  /** Blit the virtual buffer to the screen. Called once per frame by core. */
-  present() {
-    const c = this.screenCtx;
-    c.imageSmoothingEnabled = false;
-    c.drawImage(this.buffer, 0, 0, this.width * this.scale, this.height * this.scale);
-  }
+  /** End of frame. Called once per frame by core. Nothing to copy: the browser scales the canvas. */
+  present() {}
 
   /** Convert a DOM clientX/clientY to virtual pixel coordinates. */
   clientToVirtual(clientX, clientY) {

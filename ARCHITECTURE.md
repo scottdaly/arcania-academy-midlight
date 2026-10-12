@@ -76,6 +76,9 @@ that is integer-scaled to the screen. The short side is about 270 px (range 200â
 UI **must** lay out relative to `display.width/height` and respect `display.safe`
 `{top,right,bottom,left}` (safe-area insets, already in virtual px). The buffer may overhang the
 right and bottom screen edges by less than one virtual pixel.
+The on-screen canvas *is* that buffer (backing store = virtual size); CSS `image-rendering: pixelated`
+does the integer upscale in the compositor, so there is no per-frame full-screen copy and
+`display.present()` is a no-op.
 
 `imageSmoothingEnabled` is false everywhere. Draw at integer coordinates (`Math.round`).
 
@@ -631,7 +634,11 @@ Example: `http://localhost:8080/?scene=tower&floor=5&debug=1`.
 Target 60 fps on a mid-range phone at about 633Ã—292 virtual px. Avoid per-frame allocations in
 hot loops. Cache generated canvases. Keep `createRadialGradient` usage modest (fx), keep particles
 under about 1200, and keep entities under about 300. Static tiles are chunk-cached by core, so do
-not redraw the map yourself.
+not redraw the map yourself. fx renders lighting (darkness + colour tint) into quarter-resolution
+buffers computed in JS and the additive particle pass through `src/fx/additive.js` (summed in JS,
+one 'lighter' blit), so per-light and per-particle canvas ops stay off the hot path.
+Measured with `npm run perf` (phone viewport, 4x CPU throttle, headless software raster):
+dungeon brawl (~24 foes) about 34 fps, Archmage phase 3 about 46 fps; 60 fps unthrottled.
 
 ## 12. End-to-end tests
 

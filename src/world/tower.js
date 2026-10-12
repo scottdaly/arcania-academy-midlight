@@ -262,7 +262,7 @@ export function generateBossArena() {
   for (let x = 3; x < W - 3; x += 4) map.setDeco(x, 0, rng.chance(0.5) ? TILE.TORCH_WALL : TILE.BANNER);
   map.setDeco(14, 3, TILE.RUNE_CIRCLE);
   map.randomizeVariants(rng);
-  return { map, boss: { tx: 14, ty: 5 }, spawn: { tx: 14, ty: H - 4 }, exit: { tx: 14, ty: H - 2 } };
+  return { map, boss: { tx: 14, ty: 8 }, spawn: { tx: 14, ty: H - 4 }, exit: { tx: 14, ty: H - 2 } };
 }
 
 export function buildBossArena(game) {
@@ -295,6 +295,17 @@ export function buildBossArena(game) {
         g.bus.emit(EV.TOAST, { text: 'The Void Shard shatters. Corvin falls to his knees - free at last.', color: '#7ad8ff', duration: 4 });
       }, owner);
     },
-    onExit(g) { g.bus.offOwner(owner); },
+    update(g) {
+      // frame the duel: bias the camera toward the Archmage so he never hides under the boss bar
+      const p = g.player, cam = g.camera;
+      let tx = 0, ty = 0;
+      if (p && boss && !boss.dead) {
+        tx = Math.max(-cam.viewW * 0.3, Math.min(cam.viewW * 0.3, (boss.x - p.x) * 0.4));
+        ty = Math.max(-cam.viewH * 0.3, Math.min(cam.viewH * 0.3, (boss.y - 24 - p.y) * 0.4));
+      }
+      cam.offsetX += (tx - cam.offsetX) * 0.04;
+      cam.offsetY += (ty - cam.offsetY) * 0.04;
+    },
+    onExit(g) { g.bus.offOwner(owner); g.camera.offsetX = g.camera.offsetY = 0; },
   };
 }

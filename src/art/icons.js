@@ -202,8 +202,12 @@ function composeSpell(c, spell) {
   const rps = els.map(ER);
   if (kind === 'projectile') {
     for (let i = 0; i < 5; i++) line(c, 2 + i * 0.5, 14, 8, 8, rps[i % rps.length][i & 1 ? 1 : 0]);
-    orb(c, 10, 6, 4, rps[0]);
-    if (rps[1]) { px(c, 12, 5, rps[1][2]); px(c, 9, 4, rps[1][1]); }
+    if (rps[1]) {
+      // fusion: a shell of the second element around a core of the first
+      orb(c, 10, 6, 5, rps[1]);
+      orb(c, 10, 6, 3, rps[0]);
+      if (rps[2]) { px(c, 13, 3, rps[2][2]); px(c, 7, 9, rps[2][2]); }
+    } else orb(c, 10, 6, 4, rps[0]);
   } else if (kind === 'aoe') {
     ellipse(c, 8, 11, 7, 3, rps[0][0]);
     ellipse(c, 8, 11, 5, 2, rps[0][1]);
