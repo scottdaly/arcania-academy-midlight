@@ -1,21 +1,36 @@
-// UI public API (team: ui+audio). Contract: ARCHITECTURE.md §4.5. Placeholder implementation.
+// UI public API (team: ui+audio). Contract: ARCHITECTURE.md §4.5.
+//
+// Layout of this folder:
+//   font.js      bitmap pixel font (drawText / measureText / wrapText)
+//   theme.js     palette, pixel frames, buttons, bars, sweeps, element emblems, key caps
+//   widgets.js   hit regions (tap/click/hover/drag), device-aware prompts, grid navigation
+//   hud.js       in-game HUD (vitals, fragments, spell bar, boss bar, banners, minimap) + world overlay
+//   toasts.js    notification toasts
+//   touch.js     on-screen touch controls (InputSource)
+//   panels/      modal panels: title, settings, pause, gameover, victory, inventory, crafting, dialogue
+//
+// Panel factory contract (internal to ui):
+//   PANELS[name](game, ui, data) -> { update(game, dt), render(game, ctx, age), hits?, onClose?() }
+//   `age` = seconds since the panel opened (for intro animations). `hits` (createHits()) lets
+//   ui.findTarget() locate buttons for automated tests.
 import { EV } from '../core/events.js';
-import { ELEMENTS, ELEMENT_COLORS } from '../core/config.js';
 import { drawText, measureText, wrapText } from './font.js';
-import { PANELS } from './panels.js';
+import { PANELS } from './panels/index.js';
 import { createTouchControls } from './touch.js';
+import { createHud } from './hud.js';
+import { createToasts } from './toasts.js';
 
 export { drawText, measureText, wrapText };
 
-/** Panels that do NOT pause the world (none yet; e.g. a future minimap). */
+/** Panels that do NOT pause the world. */
 const NON_BLOCKING = new Set();
 
 export function createUI(game) {
-  /** Stack of open panels: [{name, data, impl}] - the top one receives input. */
+  /** Stack of open panels: [{name, data, impl, age}] - the top one receives input. */
   const stack = [];
-  const toasts = [];
-  const floaters = []; // world-space damage numbers
   let touch = null;
+  let hud = null;
+  let toasts = null;
 
   const ui = {
     drawText,
@@ -27,9 +42,10 @@ export function createUI(game) {
       const factory = PANELS[name];
       if (!factory) { console.warn(`[ui] unknown panel "${name}"`); return; }
       ui.close(name, true);
-      const entry = { name, data, impl: null };
+      const entry = { name, data, impl: null, age: 0 };
       stack.push(entry);
-      entry.impl = factory(game, ui, data);
+      entry.impl = factory(game, ui, data) || {};
+      game.input.consumeAll();
       game.bus.emit(EV.UI_OPENED, { panel: name, data });
     },
     /** Close a panel (or the top one if name omitted). */
@@ -37,6 +53,7 @@ export function createUI(game) {
       const i = name ? stack.findIndex((p) => p.name === name) : stack.length - 1;
       if (i < 0) return;
       const [p] = stack.splice(i, 1);
+      game.guard('ui.onClose', () => p.impl?.onClose?.(game));
       if (!silent) game.bus.emit(EV.UI_CLOSED, { panel: p.name });
     },
     isOpen(name) {
@@ -50,129 +67,85 @@ export function createUI(game) {
     blocksWorld() {
       return stack.some((p) => !NON_BLOCKING.has(p.name));
     },
-    toast(text, color = '#f4f0ff', duration = 2.2) {
-      toasts.push({ text, color, t: duration });
-      if (toasts.length > 4) toasts.shift();
+    /** toast(text, color?, duration?, opts?) opts {icon: 'element_fire'|'item_x'|..., emblem: el, big} */
+    toast(text, color, duration, opts) {
+      toasts?.push(text, color, duration, opts);
+    },
+    /** Are the on-screen touch controls showing right now? */
+    get touchVisible() {
+      return !!touch?.visible;
+    },
+    /** HUD instance (banner(), shake...) for internal use. */
+    get hud() { return hud; },
+    /** Touch controls instance (layout, targets). */
+    get touch() { return touch; },
+
+    /**
+     * Locate an interactive element by id, in virtual px: {x, y} centre or null.
+     * Searches touch controls ('touch:spell1', 'touch:interact', ...) then the top panel's hits.
+     * Used by scripts/smoke.mjs so tests tap real buttons instead of guessing geometry.
+     */
+    findTarget(id) {
+      if (String(id).startsWith('touch:')) return touch?.target?.(id.slice(6)) || null;
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const c = stack[i].impl?.hits?.center?.(id);
+        if (c) return c;
+      }
+      return null;
     },
 
     update(dt) {
       const inp = game.input;
-      for (let i = toasts.length - 1; i >= 0; i--) if ((toasts[i].t -= dt) <= 0) toasts.splice(i, 1);
-      for (let i = floaters.length - 1; i >= 0; i--) {
-        const f = floaters[i];
-        f.t -= dt;
-        f.y -= 18 * dt;
-        if (f.t <= 0) floaters.splice(i, 1);
-      }
+      toasts.update(dt);
+      game.guard('hud.update', () => hud.update(dt));
       const top = stack[stack.length - 1];
+      for (const p of stack) p.age += dt;
       if (top) {
-        top.impl.update?.(game, dt);
+        game.guard(`ui.panel.${top.name}.update`, () => top.impl.update?.(game, dt));
         inp.consumeAll(); // panels own input while open; nothing leaks into gameplay this tick
         return;
       }
-      if (!game.isGameplay()) return;
+      if (!game.isGameplay() || game.scenes.transitioning) return;
       if (inp.pressed('pause')) { inp.consume('pause'); ui.open('pause'); }
       else if (inp.pressed('inventory')) { inp.consume('inventory'); ui.open('inventory'); }
-      else if (inp.pressed('craft') && game.level?.kind === 'hub') { inp.consume('craft'); ui.open('crafting'); }
+      else if (inp.pressed('craft')) {
+        inp.consume('craft');
+        if (game.level?.kind === 'hub') ui.open('crafting');
+        else ui.toast('Craft at the Arcane Forge in the Academy', '#c8b8ff', 1.6);
+      }
     },
 
     /** World-space overlay (camera already applied). */
-    renderWorld(ctx) {
-      for (const f of floaters) drawText(ctx, f.text, Math.round(f.x), Math.round(f.y), { color: f.color, align: 'center', alpha: Math.min(1, f.t * 2) });
-      const t = game.interactTarget;
-      if (t && !ui.blocksWorld()) {
-        const key = game.input.lastDevice === 'touch' ? '' : 'E ';
-        drawText(ctx, key + t.interactPrompt, Math.round(t.x), Math.round(t.y) - 30, { align: 'center', color: '#ffd25a' });
-      }
-      for (const e of game.entities.list) {
-        if (e.team !== 'enemy' || e.dead || e.hp >= e.maxHp || e.tags.has('boss')) continue;
-        const w = 12, x = Math.round(e.x - w / 2), y = Math.round(e.y + 3);
-        ctx.fillStyle = '#140c1c';
-        ctx.fillRect(x - 1, y - 1, w + 2, 3);
-        ctx.fillStyle = '#ff4a5a';
-        ctx.fillRect(x, y, Math.max(0, Math.round(w * e.hp / e.maxHp)), 1);
-      }
+    renderWorld(ctx, camera) {
+      hud.renderWorld(ctx, camera);
     },
 
     /** Screen-space: HUD (gameplay only), touch controls, panels, toasts. */
     render(ctx) {
-      const W = game.display.width, H = game.display.height, s = game.display.safe;
-      if (game.isGameplay() && game.player) renderHud(ctx, W, H, s);
-      if (touch) touch.render(ctx);
-      for (const p of stack) p.impl.render?.(game, ctx);
-      toasts.forEach((t, i) => drawText(ctx, t.text, W / 2, s.top + 30 + i * 9, { align: 'center', color: t.color, alpha: Math.min(1, t.t * 2) }));
+      if (game.isGameplay() && game.player) game.guard('hud.render', () => hud.render(ctx));
+      if (touch) game.guard('touch.render', () => touch.render(ctx));
+      for (const p of stack) game.guard(`ui.panel.${p.name}.render`, () => p.impl.render?.(game, ctx, p.age));
+      toasts.render(ctx);
     },
   };
 
-  function bar(ctx, x, y, w, h, frac, color) {
-    ctx.fillStyle = '#140c1c';
-    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
-    ctx.fillStyle = '#2a2040';
-    ctx.fillRect(x, y, w, h);
-    ctx.fillStyle = color;
-    ctx.fillRect(x, y, Math.round(w * Math.max(0, Math.min(1, frac))), h);
-  }
-
-  function renderHud(ctx, W, H, s) {
-    const p = game.state.player;
-    const x = 6 + s.left, y = 6 + s.top;
-    bar(ctx, x, y, 70, 5, p.hp / p.maxHp, '#ff4a5a');
-    drawText(ctx, `${Math.ceil(p.hp)}`, x + 74, y, { color: '#ffb0b8' });
-    bar(ctx, x, y + 8, 70, 4, p.mana / p.maxMana, '#4a8aff');
-    drawText(ctx, `${Math.floor(p.mana)}`, x + 74, y + 8, { color: '#b0c8ff' });
-    // fragments
-    let fx = W - s.right - 6;
-    const fy = touch?.visible ? y + 22 : y; // keep clear of the touch INV/pause buttons
-    for (const el of [...ELEMENTS].reverse()) {
-      const txt = String(game.state.fragments[el]);
-      const w = measureText(txt) + 10;
-      fx -= w;
-      ctx.fillStyle = ELEMENT_COLORS[el][0];
-      ctx.fillRect(fx, fy + 1, 4, 4);
-      drawText(ctx, txt, fx + 6, fy, { color: ELEMENT_COLORS[el][1] });
-    }
-    if (touch?.visible) return; // touch buttons double as the spell bar
-    // spell bar
-    const slotW = 20, total = slotW * 4;
-    const bx = Math.round(W / 2 - total / 2), by = H - s.bottom - 22;
-    for (let i = 0; i < 4; i++) {
-      const id = game.state.loadout[i];
-      const spell = id && game.combat.getSpell(id);
-      const sx = bx + i * slotW;
-      ctx.fillStyle = 'rgba(20,12,40,0.8)';
-      ctx.fillRect(sx, by, 18, 18);
-      if (spell) {
-        game.art.drawIcon(ctx, spell.icon, sx + 1, by + 1, { disabled: p.mana < spell.manaCost });
-        const cd = game.combat.getCooldown(game, id);
-        if (cd > 0) {
-          const frac = Math.min(1, cd / Math.max(0.01, spell.cooldown));
-          ctx.fillStyle = 'rgba(0,0,0,0.6)';
-          ctx.fillRect(sx, by + 18 - Math.round(18 * frac), 18, Math.round(18 * frac));
-        }
-      }
-      drawText(ctx, String(i + 1), sx + 1, by - 7, { color: '#ffd25a' });
-    }
-    // boss bar
-    const boss = game.entities.list.find((e) => e.tags.has('boss') && !e.dead);
-    if (boss) {
-      const bw = Math.min(200, W - 120);
-      drawText(ctx, boss.def?.name || 'Boss', W / 2, y + 14, { align: 'center', color: '#ff8ad0' });
-      bar(ctx, Math.round(W / 2 - bw / 2), y + 22, bw, 4, boss.hp / boss.maxHp, '#ff3a8a');
-    }
-  }
-
   // ---- event wiring ------------------------------------------------------------------
   const { bus } = game;
-  bus.on(EV.TOAST, ({ text, color, duration }) => ui.toast(text, color, duration));
+  bus.on(EV.TOAST, ({ text, color, duration, icon, emblem } = {}) => {
+    // world's dialogue 'giveItem' toasts the raw id ('Received potion_health'); the HUD already shows a
+    // nicer 'item found' toast from INVENTORY_CHANGED, so drop the duplicate.
+    const m = /^Received (\w+)$/.exec(String(text || ''));
+    if (m && game.combat.getItem?.(m[1])) return;
+    ui.toast(text, color, duration, { icon, emblem });
+  });
   bus.on(EV.DIALOGUE_OPEN, (payload) => ui.open('dialogue', payload));
-  bus.on(EV.ENTITY_DAMAGED, ({ x, y, amount }) => floaters.push({ x, y: y - 16, text: String(amount), color: '#ffffff', t: 0.8 }));
-  bus.on(EV.PLAYER_DAMAGED, ({ amount }) => game.player && floaters.push({ x: game.player.x, y: game.player.y - 18, text: String(amount), color: '#ff6a6a', t: 0.8 }));
-  bus.on(EV.FRAGMENTS_CHANGED, ({ element, delta }) => { if (delta > 0) ui.toast(`+${delta} ${element} fragment`, ELEMENT_COLORS[element]?.[1]); });
-  bus.on(EV.SPELL_CRAFTED, ({ spellId }) => ui.toast(`Crafted ${game.combat.getSpell(spellId)?.name || spellId}!`, '#ffd25a'));
-  bus.on(EV.CRAFT_FAILED, ({ reason }) => ui.toast(`Cannot craft: ${reason}`, '#ff8a8a'));
-  bus.on(EV.SPELL_FAILED, ({ reason, caster }) => { if (caster?.tags?.has('player') && reason === 'mana') ui.toast('Not enough mana', '#8ab0ff', 0.8); });
-  bus.on(EV.SCENE_CHANGED, () => { floaters.length = 0; });
+  bus.on(EV.SCENE_CHANGED, () => {
+    // Gameplay panels never survive a scene change (menu scenes manage their own).
+    for (const n of ['pause', 'inventory', 'crafting', 'dialogue', 'settings']) if (ui.isOpen(n)) ui.close(n, true);
+  });
 
-  touch = createTouchControls(game);
+  toasts = createToasts(game, ui);
+  hud = createHud(game, ui);
+  touch = createTouchControls(game, ui);
   return ui;
 }

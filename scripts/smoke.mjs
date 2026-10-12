@@ -176,14 +176,16 @@ async function mobile(label, viewport) {
   await sleep(600);
   await shot(page, `20-${label}-title`);
 
-  // Tap "New Game" (menu geometry from ui/panels.js createMenu: title + subtitle + 8px gap).
+  // Tap "New Game". The UI reports where its buttons are (ui.findTarget, virtual px), so the
+  // test taps the real button whatever the layout.
   const tap = await page.evaluate(() => {
     const d = window.game.display;
-    const vy = Math.round(d.height * 0.3) + 26 + 14 + 8 + 2;
     const k = d.scale / d.dpr;
-    return { x: (d.width / 2) * k, y: vy * k };
+    const t = window.game.ui.findTarget('new-game');
+    return t ? { x: t.x * k, y: t.y * k } : null;
   });
-  await page.touchscreen.tap(tap.x, tap.y);
+  expect(S, !!tap, 'ui.findTarget("new-game") should locate the New Game button');
+  if (tap) await page.touchscreen.tap(tap.x, tap.y);
   const started = await page.waitForFunction(() => window.game.scenes.currentName === 'hub', null, { timeout: 2000 }).then(() => true, () => false);
   if (!started) {
     problems.push({ scenario: S, kind: 'assert', text: 'tapping New Game should start the game' });
@@ -208,13 +210,14 @@ async function mobile(label, viewport) {
   const after = await playerPos(page);
   expect(S, before && after && Math.hypot(after.x - before.x, after.y - before.y) > 4, 'touch joystick should move the player');
 
-  // Tap spell button 1 (geometry from ui/touch.js layout()).
+  // Tap spell button 1 (the UI reports its touch button positions in virtual px).
   const btn = await page.evaluate(() => {
-    const d = window.game.display, s = d.safe;
-    const px = d.width - s.right - 14, py = d.height - s.bottom - 14, a = (185 * Math.PI) / 180;
+    const d = window.game.display;
     const k = d.scale / d.dpr;
-    return { x: (px + Math.cos(a) * 50) * k, y: (py + Math.sin(a) * 50) * k };
+    const t = window.game.ui.findTarget('touch:spell1');
+    return t ? { x: t.x * k, y: t.y * k } : { x: 0, y: 0 };
   });
+  expect(S, btn.x > 0, 'ui.findTarget("touch:spell1") should locate spell button 1');
   const castBefore = await page.evaluate(() => window.game.state.stats.spellsCast);
   await page.touchscreen.tap(btn.x, btn.y);
   await sleep(250);

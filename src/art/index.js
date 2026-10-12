@@ -1,246 +1,292 @@
-// ART public API (team: art+fx). PLACEHOLDER implementation - replace freely, keep signatures.
-// Contract: ARCHITECTURE.md §4.1. All art is generated procedurally at init into offscreen
-// canvases; nothing is loaded from files. Every lookup has a visible fallback (never throws).
-import { ELEMENT_COLORS } from '../core/config.js';
+// ART public API (team: art+fx). Contract: ARCHITECTURE.md §4.1.
+// All art is generated procedurally at init into offscreen canvases; nothing is loaded from files.
+// Every lookup has a visible fallback (never throws).
+//
+// Extras beyond the contract (all optional for callers):
+//  - drawSprite opts.dir: 'down'|'up'|'side' picks directional anims (`walk_up` ...) on sheets with
+//    `dirs`. For the 'player' key, if dir is omitted it is derived from game.player.facingX/Y.
+//  - drawSprite opts.phase: 2 picks `<anim>_p2` on sheets with `phases` (the boss). If omitted for
+//    'boss_archmage', the live boss entity's `phase` field is used.
+//  - Emissive layers: sprites with glowing parts (eyes, runes, gems) record their glow pass while
+//    drawn; fx replays it additively after the lighting pass so it glows through darkness.
+//  - getSpritePixels(key, frame) -> sampled coloured pixels (fx death dissolves).
+import { ELEMENT_COLORS, ELEMENTS } from '../core/config.js';
 import { TILE_DEFS } from '../core/tiles.js';
 import { hashString } from '../core/rng.js';
-import { makeCanvas, rect, disc, px, shade, silhouette } from './pixel.js';
-import { drawTileImpl } from './tiles.js';
+import { makeCanvas, rect, silhouette } from './pixel.js';
+import { P } from './palette.js';
+import { frame, assemble } from './sheet.js';
+import { drawTileImpl, setThemeResolver } from './tiles.js';
+import { wizardSheet, CHARACTERS, randomWizardSpec, catSheet, portraitSheet, PORTRAIT_BG, specialPortrait } from './characters.js';
+import { knightSheet, golemSheet, archmageSheet, wispSheet, GOLEMS } from './enemies.js';
+import { buildObjects, fragmentSheet } from './objects.js';
+import { buildIcon } from './icons.js';
+import { drawBackdropImpl } from './backdrops.js';
 
-/** Master palette (art team may extend). */
+/** Master palette (named colours; art also uses the ramps in palette.js internally). */
 export const PALETTE = Object.freeze({
-  ink: '#140c1c', night: '#0b0716', shadow: 'rgba(0,0,0,0.35)',
-  white: '#f4f0ff', gold: '#ffd25a', purple: '#7a4aff', violet: '#b05aff',
-  skin: '#f2c49b', robe: '#4a3aa8', robeDark: '#2d2370', hat: '#3b2f8f',
+  ink: P.ink, night: P.night, shadow: P.shadow,
+  white: P.white, gold: P.gold[3], purple: '#7a4aff', violet: '#b05aff',
+  skin: P.skin[2], robe: P.robeViolet[2], robeDark: P.robeViolet[1], hat: P.robeBlue[2],
+  fel: '#7aff5a', corrupt: '#a02aa8', ghost: '#9af4ff', ember: '#ff8a2a', frost: '#e6fbff',
+  ...Object.fromEntries(Object.entries(ELEMENT_COLORS).map(([k, v]) => [k, v[0]])),
 });
 
-/** @type {Map<string, SpriteSheet>} */
+/** @type {Map<string, any>} */
 const sprites = new Map();
+let gameRef = null;
 
-/**
- * SpriteSheet: { canvas, fw, fh, ax, ay, anims: { [name]: { frames: number[], fps, loop } }, flashCanvas? }
- * Frames are laid out horizontally; (ax, ay) is the anchor (feet) inside a frame.
- */
-function sheet(fw, fh, frameCount, drawFrame, anims, ax = fw / 2, ay = fh - 1) {
-  const { canvas, ctx } = makeCanvas(fw * frameCount, fh);
-  for (let i = 0; i < frameCount; i++) {
-    ctx.save();
-    ctx.translate(i * fw, 0);
-    drawFrame(ctx, i);
-    ctx.restore();
+// ------------------------------------------------------------------ emissive queue (read by fx)
+
+const glowQueue = [];
+const GLOW_MAX = 160;
+/** Called by fx after lighting: draws queued emissive layers additively, then clears the queue. */
+export function flushGlow(ctx, strength = 1) {
+  if (!glowQueue.length) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const q of glowQueue) {
+    ctx.setTransform(q.m);
+    ctx.globalAlpha = q.alpha * strength;
+    ctx.drawImage(q.s.glowCanvas, q.frame * q.s.fw, 0, q.s.fw, q.s.fh, q.dx, q.dy, q.dw, q.dh);
+    // soft bloom: the same glow, slightly offset
+    if (q.s.glowBloom !== false) {
+      ctx.globalAlpha = q.alpha * strength * 0.35;
+      ctx.drawImage(q.s.glowCanvas, q.frame * q.s.fw, 0, q.s.fw, q.s.fh, q.dx - 1, q.dy, q.dw, q.dh);
+      ctx.drawImage(q.s.glowCanvas, q.frame * q.s.fw, 0, q.s.fw, q.s.fh, q.dx + 1, q.dy, q.dw, q.dh);
+      ctx.drawImage(q.s.glowCanvas, q.frame * q.s.fw, 0, q.s.fw, q.s.fh, q.dx, q.dy - 1, q.dw, q.dh);
+    }
   }
-  return { canvas, fw, fh, ax: Math.round(ax), ay: Math.round(ay), anims, flashCanvas: null };
+  ctx.restore();
+  glowQueue.length = 0;
+}
+export function clearGlow() { glowQueue.length = 0; }
+
+// ------------------------------------------------------------------ build
+
+function sheetFor(key) {
+  if (key.startsWith('npc_')) {
+    if (key.includes('cat')) return catSheet(key.includes('white') ? P.hairWhite : key.includes('ginger') ? P.hairRed : P.hairBlack, key.includes('white') ? '#5ad8ff' : '#7aff5a');
+    const spec = CHARACTERS[key] || randomWizardSpec(hashString(key));
+    return wizardSheet(spec, { defaultDir: 'down' });
+  }
+  if (key.startsWith('familiar_')) return catSheet();
+  if (key.startsWith('portrait_')) {
+    const id = key.slice(9);
+    if (id === 'cat' || id === 'portal' || id === 'sign') return specialPortrait(id);
+    const alias = { shy: 'student_shy', wanderer: 'student3', forge: 'artificer' }[id] || id;
+    const spec = id === 'player' ? CHARACTERS.player : CHARACTERS['npc_' + alias] || randomWizardSpec(hashString('npc_' + id));
+    return portraitSheet(spec, { bg: PORTRAIT_BG[id] });
+  }
+  if (key.startsWith('enemy_')) {
+    const k = key.slice(6);
+    if (k.includes('golem')) {
+      const variant = k.includes('ember') || k.includes('magma') || k.includes('fire') ? 'ember'
+        : k.includes('frost') || k.includes('ice') ? 'frost'
+          : k.includes('crystal') || k.includes('arcane') ? 'crystal'
+            : k.includes('moss') || k.includes('earth') ? 'moss' : 'stone';
+      return golemSheet(variant, (hashString(key) % 50) + 3);
+    }
+    if (k.includes('wisp')) return wispSheet(k.includes('frost') || k.includes('ice') ? 'frost' : k.includes('storm') || k.includes('lightning') ? 'storm' : k.includes('fel') || k.includes('corrupt') ? 'fel' : k.includes('arcane') ? 'arcane' : 'ember');
+    if (k.includes('lancer')) return knightSheet({ steel: P.steel, trim: P.brass, eye: '#9af4ff', plume: '#3a6ac0', weapon: 'spear' });
+    if (k.includes('sentinel')) return knightSheet({ steel: ['#141420', '#2a2a3e', '#46485e', '#6c7088', '#a0a6be'], trim: P.gold, eye: '#ffd25a', big: true, weapon: 'halberd', towerShield: true, cape: P.robeBlue });
+    if (k.includes('captain') || k.includes('champion')) return knightSheet({ steel: P.steel, trim: P.gold, eye: '#ff7a3a', plume: '#c02a3a', cape: P.robeRed, big: true, weapon: 'greatsword' });
+    if (k.includes('knight') || k.includes('armor') || k.includes('armour')) {
+      const el = ['fire', 'ice', 'lightning', 'arcane'].find((e) => k.includes(e));
+      const eye = el === 'fire' ? '#ff8a3a' : el === 'lightning' ? '#ffe14a' : el === 'arcane' ? '#ff7af0' : '#5ad8ff';
+      return knightSheet({ steel: P.steel, trim: null, eye, plume: null, shield: el === 'fire' ? '#8a2a1a' : '#2a3a7a' });
+    }
+    if (k.includes('cat')) return catSheet();
+    // unknown enemy: a corrupted wizard
+    return wizardSheet({ ...randomWizardSpec(hashString(key)), robe: P.corrupt, eyesGlow: '#7aff5a', hat: { style: 'hood', ramp: P.corrupt } }, { defaultDir: 'side', dieTint: [120, 255, 120] });
+  }
+  if (key.startsWith('boss_')) return archmageSheet();
+  if (key.startsWith('pickup_fragment_')) return fragmentSheet(key.slice(16));
+  return null;
 }
 
-// --------------------------------------------------------------- placeholder generators
-
-const HUMANOID_ANIMS = {
-  idle: { frames: [0, 1], fps: 2, loop: true },
-  walk: { frames: [2, 3, 4, 5], fps: 8, loop: true },
-  cast: { frames: [6], fps: 1, loop: false },
-  hurt: { frames: [7], fps: 1, loop: false },
-  die: { frames: [7], fps: 1, loop: false },
-  attack: { frames: [6], fps: 1, loop: false },
-};
-
-function wizard(robe, hat, trim = PALETTE.gold, skin = PALETTE.skin, eyes = PALETTE.ink) {
-  return sheet(12, 18, 8, (c, f) => {
-    const bob = f === 1 ? 1 : 0;
-    const step = f >= 2 && f <= 5 ? [0, 1, 0, -1][f - 2] : 0;
-    // legs/feet
-    rect(c, 3 + step, 16, 2, 2, PALETTE.ink);
-    rect(c, 7 - step, 16, 2, 2, PALETTE.ink);
-    // robe
-    rect(c, 2, 8 + bob, 8, 8 - bob, robe);
-    rect(c, 1, 12, 10, 4, robe);
-    rect(c, 2, 15, 8, 1, shade(robe, -0.3));
-    rect(c, 5, 8 + bob, 2, 8 - bob, trim);
-    // head
-    rect(c, 3, 4 + bob, 6, 5, skin);
-    px(c, 4, 6 + bob, eyes); px(c, 7, 6 + bob, eyes);
-    // hat
-    rect(c, 1, 3 + bob, 10, 2, hat);
-    rect(c, 3, 1 + bob, 6, 2, hat);
-    rect(c, 5, 0 + bob, 3, 1, hat);
-    // cast frame: raised glowing hand; hurt: tint
-    if (f === 6) { rect(c, 10, 7, 2, 2, skin); px(c, 11, 6, '#fff'); }
-    if (f === 7) { c.globalCompositeOperation = 'source-atop'; rect(c, 0, 0, 12, 18, 'rgba(255,60,60,0.5)'); }
-  }, HUMANOID_ANIMS, 6, 17);
-}
-
-function knight(body = '#8a93a8', glow = '#5ad8ff') {
-  return sheet(14, 20, 8, (c, f) => {
-    const step = f >= 2 && f <= 5 ? [0, 1, 0, -1][f - 2] : 0;
-    rect(c, 3 + step, 17, 3, 3, shade(body, -0.4));
-    rect(c, 8 - step, 17, 3, 3, shade(body, -0.4));
-    rect(c, 2, 8, 10, 9, body);
-    rect(c, 2, 8, 10, 1, shade(body, 0.3));
-    rect(c, 3, 1, 8, 7, shade(body, 0.1));
-    rect(c, 4, 4, 6, 1, glow);
-    rect(c, 6, 0, 2, 2, '#c03040');
-    rect(c, 12, 5 + (f === 6 ? -3 : 0), 2, 11, '#d8dce8');
-    if (f === 7) { c.globalCompositeOperation = 'source-atop'; rect(c, 0, 0, 14, 20, 'rgba(255,60,60,0.5)'); }
-  }, HUMANOID_ANIMS, 7, 19);
-}
-
-function golem(body = '#7a7268', glow = '#ff8a3a') {
-  return sheet(20, 20, 8, (c, f) => {
-    const bob = f === 1 || f === 3 || f === 5 ? 1 : 0;
-    disc(c, 10, 11 + bob, 8, body);
-    rect(c, 3, 16, 5, 4, shade(body, -0.3));
-    rect(c, 12, 16, 5, 4, shade(body, -0.3));
-    rect(c, 0, 8 + bob + (f === 6 ? -4 : 0), 4, 7, shade(body, -0.15));
-    rect(c, 16, 8 + bob + (f === 6 ? -4 : 0), 4, 7, shade(body, -0.15));
-    rect(c, 7, 8 + bob, 2, 2, glow);
-    rect(c, 11, 8 + bob, 2, 2, glow);
-    if (f === 7) { c.globalCompositeOperation = 'source-atop'; rect(c, 0, 0, 20, 20, 'rgba(255,60,60,0.5)'); }
-  }, HUMANOID_ANIMS, 10, 19);
-}
-
-function archmage() {
-  return sheet(20, 28, 8, (c, f) => {
-    const bob = f === 1 ? 1 : 0;
-    rect(c, 3, 12 + bob, 14, 16 - bob, '#3a1450');
-    rect(c, 1, 20, 18, 8, '#2a0a3a');
-    rect(c, 9, 12 + bob, 2, 16 - bob, '#ff3a8a');
-    rect(c, 6, 6 + bob, 8, 7, '#b8a8c8');
-    rect(c, 7, 9 + bob, 2, 1, '#ff3a3a'); rect(c, 11, 9 + bob, 2, 1, '#ff3a3a');
-    rect(c, 3, 4 + bob, 14, 3, '#2a0a3a');
-    rect(c, 6, 0 + bob, 8, 4, '#2a0a3a');
-    rect(c, 9, 0 + bob, 2, 1, '#ff3a8a');
-    if (f === 6) disc(c, 17, 10, 2, '#ff6ad0');
-    if (f === 7) { c.globalCompositeOperation = 'source-atop'; rect(c, 0, 0, 20, 28, 'rgba(255,255,255,0.5)'); }
-  }, HUMANOID_ANIMS, 10, 27);
-}
-
-function single(w, h, draw, ax = w / 2, ay = h - 1, frames = 1, fps = 6) {
-  const list = Array.from({ length: frames }, (_, i) => i);
-  return sheet(w, h, frames, draw, { idle: { frames: list, fps, loop: true } }, ax, ay);
+function buildSprites() {
+  sprites.set('player', wizardSheet(CHARACTERS.player, { defaultDir: 'side' }));
+  for (const k of Object.keys(CHARACTERS)) if (k.startsWith('npc_')) sprites.set(k, sheetFor(k));
+  sprites.set('npc_cat', catSheet());
+  sprites.set('familiar_cat', sprites.get('npc_cat'));
+  sprites.set('enemy_knight', knightSheet({ steel: P.steel, trim: null, eye: '#5ad8ff', plume: null }));
+  sprites.set('enemy_knight_captain', sheetFor('enemy_knight_captain'));
+  for (const v of Object.keys(GOLEMS)) sprites.set(`enemy_golem_${v}`, golemSheet(v, 3 + v.length));
+  sprites.set('enemy_golem_magma', sprites.get('enemy_golem_ember'));
+  sprites.set('enemy_golem_ice', sprites.get('enemy_golem_frost'));
+  sprites.set('boss_archmage', archmageSheet());
+  for (const k of ['ember', 'frost', 'storm']) sprites.set(`enemy_wisp_${k}`, wispSheet(k));
+  sprites.set('enemy_lancer', sheetFor('enemy_lancer'));
+  sprites.set('enemy_sentinel', sheetFor('enemy_sentinel'));
+  buildObjects((k, s) => sprites.set(k, s), ELEMENTS);
+  for (const id of ['player', 'headmaster', 'librarian', 'alchemist', 'duelmaster', 'student', 'artificer', 'archmage', 'rival', 'quartermaster', 'healer', 'shy', 'cat', 'portal', 'sign', 'wanderer']) sprites.set(`portrait_${id}`, sheetFor(`portrait_${id}`));
 }
 
 function placeholder(key) {
   const hue = hashString(key) % 360;
-  return single(12, 12, (c) => {
-    rect(c, 0, 0, 12, 12, `hsl(${hue},70%,25%)`);
-    rect(c, 1, 1, 10, 10, `hsl(${hue},70%,55%)`);
+  const f = frame(12, 12, (c) => {
+    rect(c, 1, 1, 10, 10, `hsl(${hue},70%,25%)`);
+    rect(c, 2, 2, 8, 8, `hsl(${hue},70%,55%)`);
     rect(c, 4, 4, 4, 4, '#ff00ff');
-  }, 6, 11);
+  });
+  return assemble([f], { idle: { frames: [0], fps: 1, loop: true } }, 6, 11);
 }
 
-function buildSprites() {
-  sprites.set('player', wizard(PALETTE.robe, PALETTE.hat));
-  sprites.set('npc_headmaster', wizard('#e8e4f0', '#3a6aff', '#5ad8ff'));
-  sprites.set('npc_librarian', wizard('#3a7a4a', '#2a5a3a'));
-  sprites.set('npc_alchemist', wizard('#a8642a', '#6a3a1a', '#7aff5a'));
-  sprites.set('npc_duelmaster', wizard('#a82a3a', '#5a1a2a'));
-  sprites.set('npc_student', wizard('#3a5aa8', '#2a3a7a', '#ffffff'));
-  sprites.set('enemy_knight', knight());
-  sprites.set('enemy_knight_captain', knight('#b8a050', '#ff5a3a'));
-  sprites.set('enemy_golem_stone', golem());
-  sprites.set('enemy_golem_ember', golem('#6a3020', '#ffb03a'));
-  sprites.set('enemy_golem_frost', golem('#6a8aa8', '#e6fbff'));
-  sprites.set('boss_archmage', archmage());
+// ------------------------------------------------------------------ public API
 
-  for (const [el, [c1, c2]] of Object.entries(ELEMENT_COLORS)) {
-    sprites.set(`pickup_fragment_${el}`, single(8, 10, (c, f) => {
-      const o = f % 2;
-      rect(c, 3, 1 + o, 2, 8, c1); rect(c, 2, 3 + o, 4, 4, c1); rect(c, 3, 3 + o, 1, 3, c2);
-    }, 4, 9, 2, 3));
-  }
-  sprites.set('pickup_health', single(8, 8, (c) => { disc(c, 4, 4, 3, '#ff3a5a'); px(c, 3, 3, '#fff'); }, 4, 7));
-  sprites.set('pickup_mana', single(8, 8, (c) => { disc(c, 4, 4, 3, '#3a8aff'); px(c, 3, 3, '#fff'); }, 4, 7));
-  sprites.set('pickup_item', single(10, 10, (c) => { rect(c, 1, 3, 8, 6, '#a86a2a'); rect(c, 1, 3, 8, 2, '#d8a050'); px(c, 5, 6, PALETTE.gold); }, 5, 9));
-  sprites.set('prop_portal', single(16, 24, (c, f) => {
-    rect(c, 2, 2, 12, 22, '#2a1a4a');
-    rect(c, 4, 4, 8, 18, f ? '#7a4aff' : '#b05aff');
-    rect(c, 6, 6, 4, 14, '#e8d0ff');
-  }, 8, 23, 2, 4));
-  sprites.set('prop_tower_door', single(16, 20, (c) => { rect(c, 1, 0, 14, 20, '#4a3a5a'); rect(c, 3, 3, 10, 17, '#5a3a20'); px(c, 11, 12, PALETTE.gold); }, 8, 19));
-  sprites.set('prop_stairs_up', single(16, 16, (c) => { for (let i = 0; i < 4; i++) rect(c, 1, i * 4, 14, 3, shade('#8a8098', -i * 0.15)); }, 8, 15));
-  sprites.set('prop_stairs_down', single(16, 16, (c) => { for (let i = 0; i < 4; i++) rect(c, 1, i * 4, 14, 3, shade('#8a8098', -0.6 + i * 0.15)); }, 8, 15));
-  sprites.set('prop_forge', single(16, 16, (c, f) => { rect(c, 1, 6, 14, 10, '#4a4058'); rect(c, 3, 2, 10, 5, '#2a2438'); rect(c, 5, 8, 6, 4, f ? '#ff8a3a' : '#ffd25a'); }, 8, 15, 2, 5));
-  sprites.set('prop_chest', single(14, 12, (c) => { rect(c, 1, 2, 12, 10, '#7a4a20'); rect(c, 1, 2, 12, 3, '#a86a2a'); rect(c, 6, 5, 2, 3, PALETTE.gold); }, 7, 11));
-}
-
-// --------------------------------------------------------------- public API
-
-/** Generate all art. Called once by core before anything renders. May be async. */
+/** Generate all art. Called once by core before anything renders. */
 export async function initArt(game) {
+  gameRef = game;
   sprites.clear();
+  iconCache.clear();
+  setThemeResolver(resolveTheme);
   buildSprites();
 }
 
+/** Tile theme for the current map: map.meta.biome/theme wins, else derived from the level. */
+const BIOME_THEME = {
+  academy: 'academy', hub: 'academy', crypt: 'crypt', magma: 'magma', frost: 'frost', crystal: 'crystal', tower: 'tower', boss: 'boss',
+  catacombs: 'crypt', crypts: 'frost', vaults: 'crystal', volcano: 'magma', ice: 'frost', glacier: 'frost', caverns: 'crystal',
+};
+function themeOf(b) {
+  const id = typeof b === 'string' ? b : b?.theme || b?.id;
+  if (!id) return null;
+  return BIOME_THEME[id] || BIOME_THEME[String(id).toLowerCase()] || null;
+}
+function resolveTheme(map) {
+  const meta = map?.meta;
+  const mt = meta && (themeOf(meta.theme) || themeOf(meta.biome));
+  if (mt) return mt;
+  const lvl = gameRef?.level;
+  if (!lvl || (map && lvl.map !== map)) return 'academy';
+  const lt = themeOf(lvl.data?.theme) || themeOf(lvl.data?.biome);
+  if (lt) return lt;
+  switch (lvl.kind) {
+    case 'hub': return 'academy';
+    case 'tower': return 'tower';
+    case 'boss': return 'boss';
+    case 'dungeon': {
+      const el = lvl.data?.element;
+      return el === 'fire' ? 'magma' : el === 'ice' ? 'frost' : el === 'lightning' ? 'crystal' : 'crypt';
+    }
+    default: return 'academy';
+  }
+}
+export { resolveTheme as tileTheme };
+
+const GENERATED = /^(npc_|portrait_|enemy_|boss_|familiar_|pickup_fragment_|prop_geode_)/;
+/** True for prebuilt sprites AND for keys this module can generate (any npc_/enemy_/portrait_... key). */
 export function hasSprite(key) {
-  return sprites.has(key);
+  return sprites.has(key) || (typeof key === 'string' && GENERATED.test(key));
 }
 
-/** Always returns a SpriteSheet (placeholder for unknown keys, cached). */
+/** Always returns a SpriteSheet (generated on demand for known families; placeholder otherwise). */
 export function getSprite(key) {
   let s = sprites.get(key);
-  if (!s) sprites.set(key, (s = placeholder(key)));
+  if (!s) {
+    try { s = sheetFor(key); } catch (err) { console.warn('[art] sprite build failed', key, err); }
+    if (!s) s = placeholder(key);
+    sprites.set(key, s);
+  }
   return s;
+}
+
+function pickDir(key, opts) {
+  if (opts.dir) return opts.dir;
+  if (key !== 'player') return null;
+  const p = gameRef?.player;
+  if (!p) return null;
+  const fx = p.facingX ?? 1, fy = p.facingY ?? 0;
+  if (Math.abs(fy) > Math.abs(fx) * 1.2) return fy < 0 ? 'up' : 'down';
+  return 'side';
+}
+
+function pickPhase(key, opts) {
+  if (opts.phase != null) return opts.phase;
+  if (key !== 'boss_archmage' || !gameRef?.entities) return 1;
+  for (const e of gameRef.entities.list) if (e.tags?.has('boss') && !e.dead) return e.phase || 1;
+  return 1;
 }
 
 /**
  * Draw a sprite with its anchor at world/screen (x, y).
- * opts: { anim='idle', t=0 (seconds into anim), frame (overrides anim), flip=false,
- *         alpha=1, flash=0 (0..1 white overlay for hits), scale=1 }
+ * opts: { anim='idle', t=0, frame, flip=false, alpha=1, flash=0, scale=1, dir?, phase?, glow=true }
  */
 export function drawSprite(ctx, key, x, y, opts = {}) {
   const s = getSprite(key);
-  const anim = s.anims[opts.anim || 'idle'] || s.anims.idle || { frames: [0], fps: 1, loop: true };
-  let frame = opts.frame;
-  if (frame == null) {
+  let name = opts.anim || 'idle';
+  if (s.dirs) {
+    const d = pickDir(key, opts);
+    if (d && s.anims[`${name}_${d}`]) name = `${name}_${d}`;
+  }
+  if (s.phases && pickPhase(key, opts) >= 2 && s.anims[`${name}_p2`]) name = `${name}_p2`;
+  const anim = s.anims[name] || s.anims.idle || { frames: [0], fps: 1, loop: true };
+  let fr = opts.frame;
+  if (fr == null) {
     const n = anim.frames.length;
     let i = Math.floor((opts.t || 0) * anim.fps);
     i = anim.loop === false ? Math.min(i, n - 1) : ((i % n) + n) % n;
-    frame = anim.frames[i];
+    fr = anim.frames[i];
   }
   const scale = opts.scale || 1;
   const dw = s.fw * scale, dh = s.fh * scale;
   ctx.save();
   if (opts.alpha != null) ctx.globalAlpha *= opts.alpha;
+  const baseAlpha = ctx.globalAlpha;
   ctx.translate(Math.round(x), Math.round(y));
-  if (opts.flip) ctx.scale(-1, 1);
+  // vertical-facing frames are symmetric enough; only flip side views
+  if (opts.flip && !(name.endsWith('_up') || name.endsWith('_down'))) ctx.scale(-1, 1);
   const dx = -s.ax * scale, dy = -s.ay * scale;
-  ctx.drawImage(s.canvas, frame * s.fw, 0, s.fw, s.fh, dx, dy, dw, dh);
+  ctx.drawImage(s.canvas, fr * s.fw, 0, s.fw, s.fh, dx, dy, dw, dh);
   if (opts.flash > 0) {
     s.flashCanvas ||= silhouette(s.canvas);
     ctx.globalAlpha *= Math.min(1, opts.flash);
-    ctx.drawImage(s.flashCanvas, frame * s.fw, 0, s.fw, s.fh, dx, dy, dw, dh);
+    ctx.drawImage(s.flashCanvas, fr * s.fw, 0, s.fw, s.fh, dx, dy, dw, dh);
+  }
+  if (s.glowCanvas && opts.glow !== false && glowQueue.length < GLOW_MAX && ctx.globalCompositeOperation === 'source-over') {
+    glowQueue.push({ s, frame: fr, m: ctx.getTransform(), dx, dy, dw, dh, alpha: baseAlpha });
   }
   ctx.restore();
 }
 
 /** Soft oval shadow under an actor at feet position (x, y). */
 export function drawShadow(ctx, x, y, w = 8) {
-  ctx.fillStyle = PALETTE.shadow;
-  const hw = Math.round(w / 2);
-  ctx.fillRect(Math.round(x) - hw + 1, Math.round(y) - 1, hw * 2 - 2, 1);
-  ctx.fillRect(Math.round(x) - hw, Math.round(y), hw * 2, 1);
-  ctx.fillRect(Math.round(x) - hw + 1, Math.round(y) + 1, hw * 2 - 2, 1);
+  const hw = Math.max(2, Math.round(w / 2));
+  const X = Math.round(x), Y = Math.round(y);
+  ctx.fillStyle = 'rgba(8,4,20,0.22)';
+  ctx.fillRect(X - hw + 1, Y - 1, hw * 2 - 2, 3);
+  ctx.fillRect(X - hw, Y, hw * 2, 1);
+  ctx.fillStyle = 'rgba(8,4,20,0.25)';
+  ctx.fillRect(X - hw + 2, Y - 1, hw * 2 - 4, 2);
 }
 
 const iconCache = new Map();
+function iconLookup(kind, id) {
+  try {
+    const c = gameRef?.combat;
+    if (!c) return null;
+    return kind === 'spell' ? c.getSpell?.(id) || c.SPELLS?.[id] || null : c.getItem?.(id) || c.ITEMS?.[id] || null;
+  } catch { return null; }
+}
 /**
  * 16x16 icon, top-left at (x, y). Keys: 'element_<el>', 'spell_<spellId>', 'item_<itemId>',
  * 'ui_<name>'. opts: { size=16, alpha=1, disabled=false }
  */
 export function drawIcon(ctx, key, x, y, opts = {}) {
+  if (!key) return;
   let c = iconCache.get(key);
   if (!c) {
-    const { canvas, ctx: g } = makeCanvas(16, 16);
-    const el = key.startsWith('element_') ? key.slice(8) : null;
-    const [c1, c2] = ELEMENT_COLORS[el] || [`hsl(${hashString(key) % 360},70%,55%)`, '#fff'];
-    rect(g, 1, 1, 14, 14, '#1a1428');
-    if (el) { rect(g, 6, 2, 4, 12, c1); rect(g, 3, 5, 10, 6, c1); rect(g, 7, 4, 2, 6, c2); }
-    else { disc(g, 8, 8, 5, c1); disc(g, 7, 7, 2, c2); }
-    iconCache.set(key, (c = canvas));
+    c = buildIcon(key, iconLookup);
+    iconCache.set(key, c);
   }
   const size = opts.size || 16;
   ctx.save();
   ctx.globalAlpha *= opts.alpha ?? 1;
-  if (opts.disabled) ctx.globalAlpha *= 0.35;
+  if (opts.disabled) {
+    ctx.globalAlpha *= 0.4;
+    if ('filter' in ctx) ctx.filter = 'grayscale(1)';
+  }
   ctx.drawImage(c, Math.round(x), Math.round(y), size, size);
   ctx.restore();
 }
@@ -252,26 +298,34 @@ export function drawTile(ctx, tileId, px0, py0, variant = 0, time = 0, tx = 0, t
 
 /** Full-screen backdrop for menu scenes. name: 'title' | 'gameover' | 'victory'. */
 export function drawBackdrop(ctx, name, w, h, t) {
-  const top = name === 'gameover' ? '#1a0408' : name === 'victory' ? '#1a1430' : '#0b0716';
-  const bot = name === 'gameover' ? '#3a0a14' : name === 'victory' ? '#5a3a7a' : '#2a1a4a';
-  const g = ctx.createLinearGradient(0, 0, 0, h);
-  g.addColorStop(0, top);
-  g.addColorStop(1, bot);
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  for (let i = 0; i < 80; i++) {
-    const sx = (hashString('sx' + i) % 1000) / 1000 * w;
-    const sy = (hashString('sy' + i) % 1000) / 1000 * h * 0.7;
-    const tw = 0.5 + 0.5 * Math.sin(t * 2 + i);
-    ctx.fillStyle = `rgba(255,255,255,${0.2 + tw * 0.6})`;
-    ctx.fillRect(sx | 0, sy | 0, 1, 1);
-  }
-  // Mage Tower silhouette
-  const cx = (w * 0.72) | 0;
-  ctx.fillStyle = '#05030a';
-  ctx.fillRect(cx - 10, (h * 0.25) | 0, 20, h);
-  ctx.fillRect(cx - 14, (h * 0.25) | 0, 28, 4);
-  ctx.fillRect(0, (h * 0.85) | 0, w, h);
-  ctx.fillStyle = name === 'gameover' ? '#ff3a3a' : '#b05aff';
-  ctx.fillRect(cx - 1, ((h * 0.25) | 0) - 6, 3, 3);
+  drawBackdropImpl(ctx, name, w, h, t);
+}
+
+// ------------------------------------------------------------------ helpers for fx
+
+const pixelCache = new Map();
+/**
+ * Sample up to `max` opaque pixels of a sprite frame: [{x, y, c}] relative to the anchor.
+ * Used by fx for pixel-dissolve deaths. Cached per (key, frame).
+ */
+export function getSpritePixels(key, frameIndex = 0, max = 90) {
+  const ck = `${key}:${frameIndex}`;
+  let out = pixelCache.get(ck);
+  if (out) return out;
+  out = [];
+  try {
+    const s = getSprite(key);
+    const { ctx } = makeCanvas(s.fw, s.fh);
+    ctx.drawImage(s.canvas, frameIndex * s.fw, 0, s.fw, s.fh, 0, 0, s.fw, s.fh);
+    const d = ctx.getImageData(0, 0, s.fw, s.fh).data;
+    const all = [];
+    for (let y = 0; y < s.fh; y++) for (let x = 0; x < s.fw; x++) {
+      const i = (y * s.fw + x) * 4;
+      if (d[i + 3] > 128) all.push({ x: x - s.ax, y: y - s.ay, c: `rgb(${d[i]},${d[i + 1]},${d[i + 2]})` });
+    }
+    const step = Math.max(1, all.length / max);
+    for (let i = 0; i < all.length && out.length < max; i += step) out.push(all[Math.floor(i)]);
+  } catch { /* fall through with empty list */ }
+  pixelCache.set(ck, out);
+  return out;
 }
